@@ -20,9 +20,9 @@ Shader "GLTF/GLTFStandard" {
 		_EmissionMap("Emission", 2D) = "black" {}
 
 		[Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull Mode", Float) = 0.0
-		[HideInInspector] _SrcBlend ("__src", Float) = 1.0
-		[HideInInspector] _DstBlend ("__dst", Float) = 0.0
-		[HideInInspector] _ZWrite ("__zw", Float) = 1.0
+		_SrcBlend ("__src", Float) = 1.0
+		_DstBlend ("__dst", Float) = 0.0
+		_ZWrite ("__zw", Float) = 1.0
 	}
 
 	CGINCLUDE
