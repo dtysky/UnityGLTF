@@ -6,9 +6,11 @@ using UnityEngine.Networking;
 
 namespace GLTF {
 
-	class GLTFComponent : MonoBehaviour
+	public class GLTFComponent : MonoBehaviour
 	{
 		public string Url;
+		public string importDirectory;
+		public bool saveInProject;
 		public bool Multithreaded = true;
 
 		public int MaximumLod = 300;
@@ -16,17 +18,25 @@ namespace GLTF {
 		public Shader GLTFStandard;
 		public Shader GLTFConstant;
 
-		IEnumerator Start()
+		public IEnumerator Start()
 		{
-			var loader = new GLTFLoader(
+			var loader = new GLTFFileLoader(
 				Url,
-				gameObject.transform
+				gameObject.transform,
+				saveInProject, 
+				importDirectory
 			);
-			loader.SetShaderForMaterialType(GLTFLoader.MaterialType.PbrMetallicRoughness, GLTFStandard);
-			loader.SetShaderForMaterialType(GLTFLoader.MaterialType.CommonConstant, GLTFConstant);
+
+			loader.SetShaderForMaterialType(GLTFFileLoader.MaterialType.PbrMetallicRoughness, GLTFStandard);
+			loader.SetShaderForMaterialType(GLTFFileLoader.MaterialType.CommonConstant, GLTFConstant);
 			loader.Multithreaded = Multithreaded;
 			loader.MaximumLod = MaximumLod;
 			yield return loader.Load();
+		}
+
+		public void ImportCoroutine()
+		{
+			StartCoroutine(Start());
 		}
 	}
 }
