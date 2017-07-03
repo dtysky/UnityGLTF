@@ -492,13 +492,13 @@ namespace GLTF
 			if (Contents.AsTexcoords != null) return Contents.AsTexcoords;
 
 			var arr = AsVector2Array();
-			for (var i=0; i<arr.Length; i++)
+/*			for (var i=0; i<arr.Length; i++)
 			{
 				arr[i].y *= -1;
 			}
 
 			Contents.AsTexcoords = arr;
-			Contents.AsVec2s = null;
+			Contents.AsVec2s = null;*/
 
 			return arr;
 		}

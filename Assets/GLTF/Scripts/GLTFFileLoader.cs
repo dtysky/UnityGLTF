@@ -26,9 +26,11 @@ namespace GLTF
 		public int MaximumLod = 300;
 		protected readonly bool _saveInProject;
 		protected readonly string _gltfUrl;
+		protected readonly string _prefabName;
 		protected readonly string _importDirectory;
 		protected readonly string _importTexturesDirectory;
 		protected readonly string _importMeshesDirectory;
+		protected readonly string _importMaterialsDirectory;
 		protected GLTFRoot _root;
 		protected GameObject _lastLoadedScene;
 		protected AsyncAction asyncAction;
@@ -64,8 +66,12 @@ namespace GLTF
 
 				_importMeshesDirectory = _importDirectory + "/meshes";
 				Directory.CreateDirectory(_importMeshesDirectory);
+
+				_importMaterialsDirectory = _importDirectory + "/materials";
+				Directory.CreateDirectory(_importMaterialsDirectory);
+
+				_prefabName = Path.GetFileNameWithoutExtension(_gltfUrl);
 			}
-				
 
 			_sceneParent = parent;
 			asyncAction = new AsyncAction();
@@ -132,9 +138,8 @@ namespace GLTF
 			var sceneObj = CreateScene(scene);
 			if (_saveInProject)
 			{
-				Debug.Log("PREFAB dir: "+ _importDirectory + "/" + sceneObj.name);
 				string prefabPathInProject = getPathProjectFromAbsolute(_importDirectory);
-				UnityEngine.Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject + "/" + sceneObj.name + ".prefab");
+				UnityEngine.Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject + "/" + _prefabName + ".prefab");
 				PrefabUtility.ReplacePrefab(sceneObj, prefab, ReplacePrefabOptions.ConnectToPrefab);
 				Debug.Log("Prefab created!");
 			}
@@ -279,15 +284,13 @@ namespace GLTF
 
 			meshFilter.sharedMesh = saveMesh(primitive.Contents, objectName);
 
-			var material = CreateMaterial(
+			var material = CreateUnityPBRMaterial(
 				primitive.Material != null ? primitive.Material.Value : DefaultMaterial,
 				primitive.Attributes.ContainsKey(SemanticProperties.Color(0))
-
 			);
 
 			var meshRenderer = primitiveObj.AddComponent<MeshRenderer>();
 			meshRenderer.material =saveMaterial(material);
-
 			return primitiveObj;
 		}
 
@@ -297,17 +300,15 @@ namespace GLTF
 			string meshProjectPath = getPathProjectFromAbsolute(_importMeshesDirectory) + "/" + name + ".asset";
 
 			AssetDatabase.CreateAsset(mesh, meshProjectPath);
-			Debug.Log("Mesh serialized " + meshProjectPath);
 			return (UnityEngine.Mesh)AssetDatabase.LoadAssetAtPath(meshProjectPath, typeof(UnityEngine.Mesh));
 		}
 
 		private UnityEngine.Material saveMaterial(UnityEngine.Material material)
 		{
 			string name = material.name.Length > 0? material.name : "default";
-			string materialProjectPath = getPathProjectFromAbsolute(_importDirectory) + "/" + name + ".mat";
+			string materialProjectPath = getPathProjectFromAbsolute(_importMaterialsDirectory) + "/" + name + ".mat";
 
 			AssetDatabase.CreateAsset(material, materialProjectPath);
-			Debug.Log("Material serialized " + materialProjectPath);
 			return (UnityEngine.Material)AssetDatabase.LoadAssetAtPath(materialProjectPath, typeof(UnityEngine.Material));
 		}
 
@@ -343,6 +344,219 @@ namespace GLTF
 				}
 			}
 		}
+
+		private bool getPixelsFromTexture(ref Texture2D texture, out Color[] pixels)
+		{
+			//Make texture readable
+			TextureImporter im = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter;
+			if (!im)
+			{
+				pixels = new Color[1];
+				return false;
+			}
+
+			bool readable = im.isReadable;
+			TextureImporterCompression format = im.textureCompression;
+			TextureImporterType type = im.textureType;
+			bool isConvertedBump = im.convertToNormalmap;
+
+			if (!readable)
+				im.isReadable = true;
+			if (type != TextureImporterType.Default)
+				im.textureType = TextureImporterType.Default;
+
+			im.textureCompression = TextureImporterCompression.Uncompressed;
+			im.SaveAndReimport();
+
+			pixels = texture.GetPixels();
+
+
+			if (!readable)
+				im.isReadable = false;
+			if (type != TextureImporterType.Default)
+				im.textureType = type;
+
+			if (isConvertedBump)
+				im.convertToNormalmap = true;
+
+			im.textureCompression = format;
+			im.SaveAndReimport();
+
+			return true;
+		}
+
+		private List<UnityEngine.Texture2D> splitMetalRoughTexture(Texture2D inputTexture)
+		{
+			List<UnityEngine.Texture2D> outputs = new List<UnityEngine.Texture2D>();
+			int width = inputTexture.width;
+			int height = inputTexture.height;
+
+			Color[] occlusion = new Color[width * height];
+			Color[] metalRough = new Color[width * height];
+			Color[] textureColors = new Color[inputTexture.width * inputTexture.height];
+
+			Debug.Log(getPixelsFromTexture(ref inputTexture, out textureColors));
+			Debug.Log(textureColors[3]);
+			for (int i = 0; i < height; ++i)
+			{
+				for (int j = 0; j < width; ++j)
+				{
+					occlusion[i * width + j] = new Color(textureColors[i * width + j].r, textureColors[i * width + j].r, textureColors[i * width + j].r, 1.0f);
+					metalRough[i * width + j] = new Color(textureColors[i * width + j].b, textureColors[i * width + j].b, textureColors[i * width + j].b, 1.0f - textureColors[i * width + j].g);
+				}
+			}
+
+			Texture2D metalRoughTexture = new Texture2D(width, height);
+			metalRoughTexture.SetPixels(metalRough);
+
+			Texture2D occlusionTexture = new Texture2D(width, height);
+			occlusionTexture.SetPixels(occlusion);
+
+			//write textures
+			string inputTexturePath = AssetDatabase.GetAssetPath(inputTexture);
+			string metalRoughPath = Path.GetDirectoryName(inputTexturePath) + "/" + Path.GetFileNameWithoutExtension(inputTexturePath) + "_metal" + Path.GetExtension(inputTexturePath);
+			string occlusionPath = Path.GetDirectoryName(inputTexturePath) + "/" + Path.GetFileNameWithoutExtension(inputTexturePath) + "_occlusion" + Path.GetExtension(inputTexturePath);
+
+			File.WriteAllBytes(metalRoughPath, metalRoughTexture.EncodeToPNG());
+			File.WriteAllBytes(occlusionPath, occlusionTexture.EncodeToPNG());
+
+			AssetDatabase.ImportAsset(metalRoughPath);
+			AssetDatabase.ImportAsset(occlusionPath);
+
+			outputs.Add(metalRoughTexture);
+			outputs.Add(occlusionTexture);
+		    return outputs;
+		}
+
+		protected virtual UnityEngine.Material CreateUnityPBRMaterial(Material def, bool useVertexColors)
+		{
+			if (def.ContentsWithVC == null || def.ContentsWithoutVC == null)
+			{
+				Shader shader = Shader.Find("Standard");
+
+				shader.maximumLOD = MaximumLod;
+
+				var material = new UnityEngine.Material(shader);
+				material.name = def.Name;
+
+				//if (def.AlphaMode == AlphaMode.MASK)
+				//{
+				//	material.SetOverrideTag("RenderType", "TransparentCutout");
+				//	material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+				//	material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+				//	material.SetInt("_ZWrite", 1);
+				//	material.EnableKeyword("_ALPHATEST_ON");
+				//	material.DisableKeyword("_ALPHABLEND_ON");
+				//	material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+				//	material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+				//	material.SetFloat("_Cutoff", (float)def.AlphaCutoff);
+				//}
+				//else if (def.AlphaMode == AlphaMode.BLEND)
+				//{
+				//	material.SetOverrideTag("RenderType", "Transparent");
+				//	material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+				//	material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+				//	material.SetInt("_ZWrite", 0);
+				//	material.DisableKeyword("_ALPHATEST_ON");
+				//	material.EnableKeyword("_ALPHABLEND_ON");
+				//	material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+				//	material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+				//}
+				//else
+				//{
+				//	material.SetOverrideTag("RenderType", "Opaque");
+				//	material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+				//	material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+				//	material.SetInt("_ZWrite", 1);
+				//	material.DisableKeyword("_ALPHATEST_ON");
+				//	material.DisableKeyword("_ALPHABLEND_ON");
+				//	material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+				//	material.renderQueue = -1;
+				//}
+
+				//if (def.DoubleSided)
+				//{
+				//	material.SetInt("_Cull", (int)CullMode.Off);
+				//}
+				//else
+				//{
+				//	material.SetInt("_Cull", (int)CullMode.Back);
+				//}
+
+				if (def.PbrMetallicRoughness != null)
+				{
+					var pbr = def.PbrMetallicRoughness;
+
+					material.SetColor("_Color", pbr.BaseColorFactor);
+
+					if (pbr.BaseColorTexture != null)
+					{
+						var texture = pbr.BaseColorTexture.Index.Value;
+						material.SetTexture("_MainTex", CreateTexture(texture));
+					}
+					material.EnableKeyword("_METALLICGLOSSMAP");
+					material.SetFloat("_Metallic", (float)pbr.MetallicFactor);
+					material.SetFloat("_Glossiness", 1.0f - (float)pbr.RoughnessFactor);
+
+					if (pbr.MetallicRoughnessTexture != null)
+					{
+						material.EnableKeyword("_METALLICGLOSSMAP");
+
+						var texture = pbr.MetallicRoughnessTexture.Index.Value;
+						UnityEngine.Texture2D inputTexture = CreateTexture(texture) as Texture2D;
+						List<Texture2D> splitTextures = splitMetalRoughTexture(inputTexture);
+						material.SetTexture("_MetallicGlossMap", splitTextures[0]);
+						material.EnableKeyword("_METALLICGLOSSMAP");
+
+						if (def.OcclusionTexture != null)
+						{
+							material.SetFloat("_OcclusionStrength", (float)def.OcclusionTexture.Strength);
+							material.SetTexture("_OcclusionMap", splitTextures[1]);
+						}
+					}
+				}
+
+				//if (def.CommonConstant != null)
+				//{
+				//	material.SetColor("_AmbientFactor", def.CommonConstant.AmbientFactor);
+
+				//	if (def.CommonConstant.LightmapTexture != null)
+				//	{
+				//		material.EnableKeyword("LIGHTMAP_ON");
+
+				//		var texture = def.CommonConstant.LightmapTexture.Index.Value;
+				//		material.SetTexture("_LightMap", CreateTexture(texture));
+				//		material.SetInt("_LightUV", def.CommonConstant.LightmapTexture.TexCoord);
+				//	}
+
+				//	material.SetColor("_LightFactor", def.CommonConstant.LightmapFactor);
+				//}
+
+				if (def.NormalTexture != null)
+				{
+					var texture = def.NormalTexture.Index.Value;
+					material.SetTexture("_BumpMap", CreateTexture(texture));
+					material.SetFloat("_BumpScale", (float)def.NormalTexture.Scale);
+				}
+
+				if (def.EmissiveTexture != null)
+				{
+					var texture = def.EmissiveTexture.Index.Value;
+					material.EnableKeyword("EMISSION_MAP_ON");
+					material.SetTexture("_EmissionMap", CreateTexture(texture));
+					material.SetInt("_EmissionUV", def.EmissiveTexture.TexCoord);
+				}
+
+				material.SetColor("_EmissionColor", def.EmissiveFactor);
+
+				def.ContentsWithoutVC = material;
+				def.ContentsWithVC = new UnityEngine.Material(material);
+				def.ContentsWithVC.EnableKeyword("VERTEX_COLOR_ON");
+			}
+
+			return def.GetContents(useVertexColors);
+		}
+
 
 		protected virtual UnityEngine.Material CreateMaterial(Material def, bool useVertexColors)
 		{
@@ -532,7 +746,7 @@ namespace GLTF
 						break;
 				}
 			}
-			Debug.Log(source);
+
 			if (source.filterMode == desiredFilterMode && source.wrapMode == desiredWrapMode)
 			{
 				texture.Contents = source;
@@ -561,7 +775,34 @@ namespace GLTF
 			return partialPath + relativePath;
 		}
 
-		protected virtual IEnumerator LoadImage(Image image)
+		private Texture2D flipYtexture(Texture2D inputTexture)
+		{
+			int width = inputTexture.width;
+			int height = inputTexture.height;
+			Color[] inputPixels = new Color[width * height];
+			Color[] outputPixels = new Color[width * height];
+			getPixelsFromTexture(ref inputTexture, out inputPixels);
+
+			for (int i = 0; i < height; ++i)
+			{
+				for (int j = 0; j < width; ++j)
+				{
+					outputPixels[i * width + j] = inputPixels[(height - i - 1) * width + j];
+				}
+			}
+
+			Texture2D output = new Texture2D(width, height);
+			output.SetPixels(outputPixels);
+			string outputPath = AssetDatabase.GetAssetPath(inputTexture);
+			File.WriteAllBytes(outputPath, output.EncodeToPNG());
+
+			AssetDatabase.ImportAsset(outputPath);
+			output = (Texture2D)AssetDatabase.LoadAssetAtPath(outputPath, typeof(Texture2D));
+
+			return output;
+		}
+
+		protected virtual IEnumerator LoadImage(Image image, bool flipY = true)
 		{
 			Texture2D texture = null;
 			if(_saveInProject)
@@ -584,16 +825,16 @@ namespace GLTF
     			if (!File.Exists(textureOutput)) 
 					File.Copy(inputTexturePath, textureOutput);
 
-
 				string outputTextureProjectPath = getPathProjectFromAbsolute(textureOutput);
+
 				Debug.Log("Importing asset '" + textureOutput + "' ...");
 				AssetDatabase.ImportAsset(outputTextureProjectPath);
+
 				texture = (Texture2D)AssetDatabase.LoadAssetAtPath(outputTextureProjectPath, typeof(Texture2D));
+				texture = flipYtexture(texture);
 
 				if (!texture)
 					Debug.Log("Failed to import texture asset '" + textureOutput + "'.");
-
-				texture = (Texture2D)AssetDatabase.LoadAssetAtPath(outputTextureProjectPath, typeof(Texture2D));
 			}
 			else
 			{
@@ -685,6 +926,11 @@ namespace GLTF
 					GameObject.Destroy(prim.Contents);
 				}
 			}
+		}
+
+		private void convertMaterial(UnityEngine.Material mat)
+		{
+			
 		}
 	}
 }
