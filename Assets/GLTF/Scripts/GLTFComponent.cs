@@ -18,7 +18,7 @@ namespace GLTF {
 		public Shader GLTFStandard;
 		public Shader GLTFConstant;
 
-		public IEnumerator Start()
+		public void Start()
 		{
 			var loader = new GLTFFileLoader(
 				Url,
@@ -31,12 +31,7 @@ namespace GLTF {
 			loader.SetShaderForMaterialType(GLTFFileLoader.MaterialType.CommonConstant, GLTFConstant);
 			loader.Multithreaded = Multithreaded;
 			loader.MaximumLod = MaximumLod;
-			yield return loader.Load();
-		}
-
-		public void ImportCoroutine()
-		{
-			StartCoroutine(Start());
+			loader.Load();
 		}
 	}
 }
