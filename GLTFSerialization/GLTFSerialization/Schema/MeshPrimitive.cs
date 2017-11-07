@@ -169,16 +169,16 @@ namespace GLTF.Schema
 					case "mode":
 						primitive.Mode = (DrawMode)reader.ReadAsInt32().Value;
 						break;
-					case "targets":
-						primitive.Targets = reader.ReadList(() =>
-						{
-							return reader.ReadAsDictionary(() => new AccessorId
-							{
-								Id = reader.ReadAsInt32().Value,
-								Root = root
-							});
-						});
-						break;
+					//case "targets":
+					//	primitive.Targets = reader.ReadList(() =>
+					//	{
+					//		return reader.ReadAsDictionary(() => new AccessorId
+					//		{
+					//			Id = reader.ReadAsInt32().Value,
+					//			Root = root
+					//		});
+					//	});
+					//	break;
 					default:
 						primitive.DefaultPropertyDeserializer(root, reader);
 						break;

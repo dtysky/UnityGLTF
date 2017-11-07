@@ -141,9 +141,9 @@ namespace GLTF.Schema
 					case "accessors":
 						root.Accessors = jsonReader.ReadList(() => Accessor.Deserialize(root, jsonReader));
 						break;
-					case "animations":
-						root.Animations = jsonReader.ReadList(() => Animation.Deserialize(root, jsonReader));
-						break;
+					//case "animations":
+					//	root.Animations = jsonReader.ReadList(() => Animation.Deserialize(root, jsonReader));
+					//	break;
 					case "asset":
 						root.Asset = Asset.Deserialize(root, jsonReader);
 						break;
@@ -177,9 +177,9 @@ namespace GLTF.Schema
 					case "scenes":
 						root.Scenes = jsonReader.ReadList(() => GLTF.Schema.Scene.Deserialize(root, jsonReader));
 						break;
-					case "skins":
-						root.Skins = jsonReader.ReadList(() => Skin.Deserialize(root, jsonReader));
-						break;
+					//case "skins":
+					//	root.Skins = jsonReader.ReadList(() => Skin.Deserialize(root, jsonReader));
+					//	break;
 					case "textures":
 						root.Textures = jsonReader.ReadList(() => Texture.Deserialize(root, jsonReader));
 						break;

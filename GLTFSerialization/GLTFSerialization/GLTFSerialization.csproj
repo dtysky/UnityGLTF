@@ -71,6 +71,7 @@
   <ItemGroup>
     <Compile Include="AttributeAccessor.cs" />
     <Compile Include="Exceptions.cs" />
+    <Compile Include="Extensions\KHRMaterialPBRSpecularGlossiness.cs" />
     <Compile Include="GLTFHelpers.cs" />
     <Compile Include="GLTFParser.cs" />
     <Compile Include="Math\Matrix4x4.cs" />
@@ -106,6 +107,7 @@
     <Compile Include="Schema\MaterialNormalTextureInfo.cs" />
     <Compile Include="Schema\MaterialOcclusionTextureInfo.cs" />
     <Compile Include="Schema\MaterialPBRMetallicRoughness.cs" />
+    <Compile Include="Schema\MaterialPBRSpecularGlossiness.cs" />
     <Compile Include="Schema\Mesh.cs" />
     <Compile Include="Schema\MeshPrimitive.cs" />
     <Compile Include="Schema\Node.cs" />
