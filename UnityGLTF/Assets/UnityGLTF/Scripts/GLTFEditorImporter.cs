@@ -389,19 +389,17 @@ namespace UnityGLTF
 
 		private IEnumerator LoadImages()
 		{
-			int current = 0;
-			if (_root.Images != null)
+			Debug.Log(_root.Images.Count);
+			for (int i = 0; i < _root.Images.Count; ++i)
 			{
-				while(current < _root.Images.Count)
-				{
-					Image image = _root.Images[current];
-					LoadImage(_gltfDirectoryPath, image, current);
-					setStatus("Loaded Image " + image.Uri);
-					current++;
-					yield return null;
-				}
+				Image image = _root.Images[i];
+				LoadImage(_gltfDirectoryPath, image, i);
+				setStatus("Loaded Image " + (i + 1) + "/" + _root.Images.Count + (image.Uri != null ? "(" + image.Uri + ")" : " (embedded)"), i != 0);
+				yield return null;
 			}
 		}
+
+		protected const string Base64StringInitializer = "^data:[a-z-]+/[a-z-]+;base64,";
 
 		private void LoadImage(string rootPath, Image image, int imageID)
 		{
@@ -409,16 +407,37 @@ namespace UnityGLTF
 			{
 				if (image.Uri != null)
 				{
+					// Is base64 uri ?
 					var uri = image.Uri;
-					string imagePath = Path.Combine(rootPath, uri);
-					string importedImage = _assetSerializer.copyTextureInProject(imagePath);
 
-					_importedFiles.Add(importedImage);
-					_assetSerializer._parsedImages.Add(importedImage);
+					Regex regex = new Regex(Base64StringInitializer);
+					Match match = regex.Match(uri);
+					if (match.Success)
+					{
+						var base64Data = uri.Substring(match.Length);
+						var textureData = Convert.FromBase64String(base64Data);
+
+						_assetSerializer.registerImageFromData(textureData, imageID);
+					}
+					else if(File.Exists(Path.Combine(rootPath, uri))) // File is a real file
+					{
+						string imagePath = Path.Combine(rootPath, uri);
+						_assetSerializer.copyAndRegisterImageInProject(imagePath, imageID);
+					}
+					else
+					{
+						Debug.Log("Image not found / Unknown image buffer");
+					}
 				}
 				else
 				{
-					Debug.LogError("Embedded image is unsupported");
+					var bufferView = image.BufferView.Value;
+					var buffer = bufferView.Buffer.Value;
+					var data = new byte[bufferView.ByteLength];
+
+					var bufferContents = _assetCache.BufferCache[bufferView.Buffer.Id];
+					System.Buffer.BlockCopy(bufferContents, bufferView.ByteOffset, data, 0, data.Length);
+					_assetSerializer.registerImageFromData(data, imageID);
 				}
 			}
 		}
@@ -440,10 +459,7 @@ namespace UnityGLTF
 
 		private void SetupTexture(GLTF.Schema.Texture def, int textureIndex)
 		{
-			string image = _assetSerializer._parsedImages[def.Source.Id];
-			Texture2D texture = new Texture2D(4, 4);
-			byte[] imageData = File.ReadAllBytes(image);
-			texture.LoadImage(imageData);
+			Texture2D source = _assetSerializer.getOrCreateTexture(def.Source.Id, textureIndex);
 
 			// Default values
 			var desiredFilterMode = FilterMode.Bilinear;
@@ -475,11 +491,9 @@ namespace UnityGLTF
 				}
 			}
 
-			texture.filterMode = desiredFilterMode;
-			texture.wrapMode = desiredWrapMode;
-
-			_assetSerializer._parsedTextures.Add(texture);
-			_assetSerializer.updateTexture(texture, def.Source.Id, textureIndex);
+			source.filterMode = desiredFilterMode;
+			source.wrapMode = desiredWrapMode;
+			_assetSerializer.registerTexture(source);
 		}
 
 		private void LoadSceneEnum()

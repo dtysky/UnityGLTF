@@ -19,8 +19,10 @@ public class AssetManager
 	// Store generated data
 	public List<List<KeyValuePair<Mesh, Material>>> _parsedMeshData;
 	public List<Material> _parsedMaterials;
-	public List<string> _parsedImages;
+	public List<Texture2D> _parsedImages;
 	public List<Texture2D> _parsedTextures;
+	public List<Texture2D> _parsedFinalTextures;
+	public List<int> _usedSources;
 	public AssetManager(string projectDirectoryPath, string glTFUrl)
 	{
 		// Prepare hierarchy un project
@@ -41,8 +43,9 @@ public class AssetManager
 
 		_parsedMeshData = new List<List<KeyValuePair<Mesh, Material>>>();
 		_parsedMaterials = new List<Material>();
-		_parsedImages = new List<string>();
+		_parsedImages = new List<Texture2D>();
 		_parsedTextures = new List<Texture2D>();
+		_usedSources = new List<int>();
 	}
 
 	public void addAssetToSerialize(Object asset)
@@ -95,10 +98,30 @@ public class AssetManager
 
 	public void updateTexture(Texture2D texture, int imageIndex, int textureIndex)
 	{
-		string assetPath = GLTFUtils.getPathProjectFromAbsolute(_parsedImages[imageIndex]);
-		AssetDatabase.Refresh();
-		Texture2D newTex = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-		_parsedTextures[textureIndex] = newTex;
+		_parsedTextures[imageIndex] = texture;
+	}
+
+	public Texture2D getOrCreateTexture(int imageIndex, int textureIndex)
+	{
+		if(_usedSources.Contains(imageIndex))
+		{
+			// Duplicate image
+			string origin = AssetDatabase.GetAssetPath(_parsedImages[imageIndex]);
+			string dest = Path.Combine(Path.GetDirectoryName(origin), Path.GetFileNameWithoutExtension(origin) + "_" + textureIndex + Path.GetExtension(origin));
+			AssetDatabase.CopyAsset(origin, dest);
+			Texture2D duplicate = AssetDatabase.LoadAssetAtPath<Texture2D>(dest);
+			return duplicate;
+		}
+		else
+		{
+			_usedSources.Add(imageIndex);
+			return _parsedImages[imageIndex];
+		}
+	}
+
+	public void registerTexture(Texture2D texture)
+	{
+		_parsedTextures.Add(texture);
 	}
 
 	public Mesh saveMesh(Mesh mesh, string objectName = "Scene")
@@ -114,7 +137,7 @@ public class AssetManager
 		return (Mesh) _registeredAsset[mesh.GetInstanceID()];
 	}
 
-	private Texture2D saveTexture(Texture2D texture, int index)
+	public Texture2D saveTexture(Texture2D texture, int index)
 	{
 
 		if(!_registeredAsset.ContainsKey(texture.GetInstanceID()))
@@ -181,12 +204,21 @@ public class AssetManager
 		PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.ConnectToPrefab);
 	}
 
-	public string copyTextureInProject(string imagePath)
+	public void registerImageFromData(byte[] imageData, int imageID)
 	{
-		string destPath = Path.Combine(_importTexturesDirectory, Path.GetFileName(imagePath));
-		File.Copy(imagePath, destPath, true);
+		Texture2D texture = new Texture2D(4, 4);
+		texture.LoadImage(imageData);
+		Texture2D importedTexture = saveTexture(texture, imageID);
+		_parsedImages.Add(importedTexture);
+	}
+
+	public void copyAndRegisterImageInProject(string inputImage, int imageID)
+	{
+		string destPath = Path.Combine(_importTexturesDirectory, Path.GetFileNameWithoutExtension(inputImage) + "_" + imageID + Path.GetExtension(inputImage));
+		File.Copy(inputImage, destPath, true);
 		AssetDatabase.Refresh();
-		return destPath;
+		Texture2D importedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(GLTFUtils.getPathProjectFromAbsolute(destPath));
+		_parsedImages.Add(importedTexture);
 	}
 }
 
