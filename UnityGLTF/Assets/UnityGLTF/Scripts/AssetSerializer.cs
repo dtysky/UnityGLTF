@@ -149,7 +149,7 @@ public class AssetManager
 	{
 		if (!_registeredAsset.ContainsKey(material.GetInstanceID()))
 		{
-			string name = material.name.Length > 0 ? material.name.Replace("/", "_") : "material";
+			string name = material.name.Length > 0 ? material.name.Replace("/", "_").Replace(":","_") : "material";
 			string materialProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importMaterialsDirectory) + "/" + name + "_" + index + ".mat";
 
 			if (!File.Exists(GLTFUtils.getPathAbsoluteFromProject(materialProjectPath)))

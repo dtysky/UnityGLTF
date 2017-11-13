@@ -297,6 +297,14 @@ namespace UnityGLTF
 			_assetSerializer = new AssetManager(_projectDirectoryPath, _glTFPath);
 			_glTFData = File.ReadAllBytes(_glTFPath);
 			setStatus("Loaded file: " + _glTFPath);
+			try
+			{
+				GLTFProperty.RegisterExtension(new KHR_materials_pbrSpecularGlossinessExtensionFactory());
+			}catch(Exception)
+			{
+				Debug.Log("Already added");
+			}
+
 			_root = GLTFParser.ParseJson(_glTFData);
 			setStatus("Parsed glTF data" + _root);
 		}
@@ -516,7 +524,11 @@ namespace UnityGLTF
 		// Add support for vertex colors
 		protected virtual void CreateUnityMaterial(GLTF.Schema.Material def, int materialIndex)
 		{
-			Shader shader = def.PbrSpecularGlossiness != null ? Shader.Find("Standard (Specular setup)") : Shader.Find("Standard");
+
+			Extension specularGlossinessExtension = null;
+			bool isSpecularPBR = def.Extensions !=null && def.Extensions.TryGetValue("KHR_materials_pbrSpecularGlossiness", out specularGlossinessExtension);
+
+			Shader shader = isSpecularPBR ? Shader.Find("Standard (Specular setup)") : Shader.Find("Standard");
 
 			var material = new UnityEngine.Material(shader);
 			material.hideFlags = HideFlags.DontUnloadUnusedAsset;
@@ -526,6 +538,7 @@ namespace UnityGLTF
 			{
 				GLTFUtils.SetupMaterialWithBlendMode(material, GLTFUtils.BlendMode.Cutout);
 				material.SetFloat("_Mode", 1);
+				material.SetFloat("_Cutoff", (float)def.AlphaCutoff);
 			}
 			else if (def.AlphaMode == AlphaMode.BLEND)
 			{
@@ -556,11 +569,9 @@ namespace UnityGLTF
 
 			material.SetColor("_EmissionColor", def.EmissiveFactor.ToUnityColor());
 
-			if (def.PbrSpecularGlossiness != null)
+			if (specularGlossinessExtension != null)
 			{
-				Debug.Log("USES SPECULAR");
-
-				var pbr = def.PbrSpecularGlossiness;
+				KHR_materials_pbrSpecularGlossinessExtension pbr = (KHR_materials_pbrSpecularGlossinessExtension) specularGlossinessExtension;
 				if (pbr.DiffuseTexture != null)
 				{
 					var texture = pbr.DiffuseTexture.Index.Id;
@@ -572,8 +583,8 @@ namespace UnityGLTF
 					var texture = pbr.SpecularGlossinessTexture.Index.Id;
 					material.SetTexture("_SpecGlossMap", getTexture(texture));
 				}
-
-				material.SetColor("_SpecColor", pbr.SpecularFactor.ToUnityColor());
+				Vector3 specularVec3 = pbr.SpecularFactor.ToUnityVector3();
+				material.SetColor("_SpecColor", new Color(specularVec3.x, specularVec3.y, specularVec3.z, 1.0f));
 				material.SetFloat("_Glossiness", (float)pbr.GlossinessFactor);
 
 				if (def.OcclusionTexture != null)
@@ -615,10 +626,6 @@ namespace UnityGLTF
 
 				GLTFUtils.SetMaterialKeywords(material, GLTFUtils.WorkflowMode.Metallic);
 			}
-
-
-
-			Debug.Log("Added material " + material.name);
 
 			material = _assetSerializer.saveMaterial(material, materialIndex);
 			_assetSerializer._parsedMaterials.Add(material);
