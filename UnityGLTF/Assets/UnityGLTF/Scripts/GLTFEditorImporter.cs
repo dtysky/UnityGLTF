@@ -99,7 +99,7 @@ namespace UnityGLTF
 			{
 				_samplesPathList.Clear();
 				_samplesList.Clear();
-				string[] samples = Directory.GetFiles(_samplesDir, "*.gltf", SearchOption.AllDirectories);
+				string[] samples = Directory.GetFiles(_samplesDir, "*.gl*", SearchOption.AllDirectories);
 				foreach (string sample in samples)
 				{
 					_samplesPathList.Add(sample);
@@ -119,7 +119,7 @@ namespace UnityGLTF
 			// Should move
 			GLTFStandard = Shader.Find("GLTF/GLTFStandard");
 			GLTFConstant = Shader.Find("GLTF/GLTFConstant");
-			Debug.Log(GLTFStandard);
+
 			_shaderCache.Clear();
 			_shaderCache.Add(GLTFEditorImporter.MaterialType.PbrMetallicRoughness, GLTFStandard);
 			_shaderCache.Add(GLTFEditorImporter.MaterialType.CommonConstant, GLTFConstant);
@@ -168,7 +168,7 @@ namespace UnityGLTF
 
 			// List of samples
 			GUILayout.BeginHorizontal();
-			GUILayout.Label("Import list from hardcoded directory: " + SKFB_DIRECTORY);
+			GUILayout.Label("Import list from directory: " + _samplesDir);
 			_currentSampleIndex = EditorGUILayout.Popup(_currentSampleIndex, _samplesList.ToArray());
 			if (_currentSampleIndex != _lastCurrentSampleIndex && _samplesList.Count > 0)
 			{
@@ -194,7 +194,7 @@ namespace UnityGLTF
 			// Import popup
 			if (GUILayout.Button("Import file from disk"))
 			{
-				_glTFPath = EditorUtility.OpenFilePanel("Choose glTF to import", Application.dataPath, "gltf");
+				_glTFPath = EditorUtility.OpenFilePanel("Choose glTF to import", Application.dataPath, "gl*");
 				_gltfDirectoryPath = Path.GetDirectoryName(_glTFPath);
 
 				string modeldir = Path.GetFileNameWithoutExtension(_glTFPath);
