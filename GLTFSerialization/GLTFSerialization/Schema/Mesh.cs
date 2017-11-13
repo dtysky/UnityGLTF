@@ -36,9 +36,9 @@ namespace GLTF.Schema
 					case "primitives":
 						mesh.Primitives = reader.ReadList(() => MeshPrimitive.Deserialize(root, reader));
 						break;
-					//case "weights":
-					//	mesh.Weights = reader.ReadDoubleList();
-					//	break;
+/*					case "weights":
+						mesh.Weights = reader.ReadDoubleList();
+						break;*/
 					default:
 						mesh.DefaultPropertyDeserializer(root, reader);
 						break;

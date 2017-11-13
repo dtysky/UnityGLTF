@@ -16,12 +16,6 @@ namespace GLTF.Schema
 		public PbrMetallicRoughness PbrMetallicRoughness;
 
 		/// <summary>
-		/// A set of parameter values that are used to define the specular-glossiness
-		/// material extension from Physically-Based Rendering (PBR) methodology.
-		/// </summary>
-		public PbrSpecularGlossiness PbrSpecularGlossiness;
-
-		/// <summary>
 		/// A set of parameter values used to light flat-shaded materials
 		/// </summary>
 		public MaterialCommonConstant CommonConstant;
