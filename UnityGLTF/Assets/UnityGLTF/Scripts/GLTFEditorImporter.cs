@@ -76,7 +76,7 @@ namespace UnityGLTF
 		private static string GLTF_DIRECTORY = "D:/Samples/glTF/gltf";
 		private static string GLTF_SPECULAR_DIRECTORY = "D:/Samples/glTF/gltfspecular";
 		private static string SKFB_DIRECTORY = "D:/Samples/glTF/sketchfab";
-		private static string _samplesDir = GLTF_SPECULAR_DIRECTORY;
+		private static string _samplesDir = GLTF_DIRECTORY;
 
 		private static string _currentSampleName = "";
 

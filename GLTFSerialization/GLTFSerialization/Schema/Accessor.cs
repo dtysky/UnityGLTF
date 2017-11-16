@@ -499,11 +499,11 @@ namespace GLTF.Schema
 			if (contents.AsTexcoords != null) return contents.AsTexcoords;
 
 			var arr = AsVector2Array(ref contents, bufferData);
-			for (var i = 0; i < arr.Length; i++)
+/*			for (var i = 0; i < arr.Length; i++)
 			{
 				arr[i].Y *= -1;
 			}
-
+*/
 			contents.AsTexcoords = arr;
 			contents.AsVec2s = null;
 
