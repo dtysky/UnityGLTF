@@ -137,35 +137,26 @@ public class AssetManager
 		return (Mesh) _registeredAsset[mesh.GetInstanceID()];
 	}
 
-	public Texture2D saveTexture(Texture2D texture, int index)
+	public Texture2D saveTexture(Texture2D texture, int index, string imageName="")
 	{
-
-		if(!_registeredAsset.ContainsKey(texture.GetInstanceID()))
+		string textureAbsolutePath = _importTexturesDirectory + "/" + texture.name + "_" + index;
+		string textureProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importTexturesDirectory) + "/" +texture.name + "_" + index;
+		if (texture.format == TextureFormat.ARGB32)
 		{
-			string textureAbsolutePath = _importTexturesDirectory + "/" + texture.name + "_" + index;
-			string textureProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importTexturesDirectory) + "/" +texture.name + "_" + index;
-			string texturepath = textureProjectPath;
-			if (texture.format == TextureFormat.ARGB32)
-			{
-				byte[] textureData = texture.EncodeToPNG();
-				File.WriteAllBytes(textureAbsolutePath + ".png", textureData);
-				AssetDatabase.Refresh();
-				textureProjectPath = textureProjectPath + ".png";
-			}
-			else
-			{
-				byte[] textureData = texture.EncodeToJPG();
-				File.WriteAllBytes(textureAbsolutePath +".jpg", textureData);
-				AssetDatabase.Refresh();
-				textureProjectPath  = textureProjectPath + ".jpg";
-			}
-
-			Texture2D unityTexture2D = (Texture2D)AssetDatabase.LoadAssetAtPath(textureProjectPath, typeof(Texture2D));
-			_registeredAsset.Add(texture.GetInstanceID(), unityTexture2D);
+			byte[] textureData = texture.EncodeToPNG();
+			File.WriteAllBytes(textureAbsolutePath + ".png", textureData);
+			AssetDatabase.Refresh();
+			textureProjectPath = textureProjectPath + ".png";
+		}
+		else
+		{
+			byte[] textureData = texture.EncodeToJPG(100);
+			File.WriteAllBytes(textureAbsolutePath +".jpg", textureData);
+			AssetDatabase.Refresh();
+			textureProjectPath  = textureProjectPath + ".jpg";
 		}
 
-		return (Texture2D) _registeredAsset[texture.GetInstanceID()];
-
+		return (Texture2D)AssetDatabase.LoadAssetAtPath(textureProjectPath, typeof(Texture2D));
 	}
 
 	public Material saveMaterial(Material material, int index)
@@ -204,21 +195,24 @@ public class AssetManager
 		PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.ConnectToPrefab);
 	}
 
-	public void registerImageFromData(byte[] imageData, int imageID)
+	public void registerImageFromData(byte[] imageData, int imageID, string imageName="")
 	{
 		Texture2D texture = new Texture2D(4, 4);
+		texture.name = imageName;
 		texture.LoadImage(imageData);
-		Texture2D importedTexture = saveTexture(texture, imageID);
+
+		Texture2D importedTexture = saveTexture(GLTFTextureUtils.flipTexture(texture), imageID);
 		_parsedImages.Add(importedTexture);
 	}
 
 	public void copyAndRegisterImageInProject(string inputImage, int imageID)
 	{
-		string destPath = Path.Combine(_importTexturesDirectory, Path.GetFileNameWithoutExtension(inputImage) + "_" + imageID + Path.GetExtension(inputImage));
-		File.Copy(inputImage, destPath, true);
-		AssetDatabase.Refresh();
-		Texture2D importedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(GLTFUtils.getPathProjectFromAbsolute(destPath));
-		_parsedImages.Add(importedTexture);
+		string imageName = Path.GetFileNameWithoutExtension(inputImage);
+		byte[] imageData = File.ReadAllBytes(inputImage);
+		bool srgb = GL.sRGBWrite;
+		GL.sRGBWrite = true;
+		registerImageFromData(imageData, imageID, imageName);
+		GL.sRGBWrite = srgb;
 	}
 }
 

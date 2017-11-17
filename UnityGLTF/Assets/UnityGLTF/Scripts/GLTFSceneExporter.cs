@@ -96,17 +96,12 @@ namespace UnityGLTF
 			gltfFile.Close();
 			binFile.Close();
 #endif
-
+			GL.sRGBWrite = true;
 			foreach (var image in _images)
 			{
-				Debug.Log(image.name);
-				var renderTexture = RenderTexture.GetTemporary(image.width, image.height);
-				Graphics.Blit(image, renderTexture);
-				RenderTexture.active = renderTexture;
-				var exportTexture = new Texture2D(image.width, image.height);
-				exportTexture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
-				exportTexture.Apply();
-				File.WriteAllBytes(Path.Combine(path, image.name + ".png"), exportTexture.EncodeToPNG());
+				//Should filter regarding channel that use it
+				string outputPath = Path.Combine(path, image.name + ".png");
+				GLTFTextureUtils.writeTextureOnDisk(GLTFTextureUtils.flipTexture(image), outputPath);
 			}
 		}
 
@@ -323,7 +318,7 @@ namespace UnityGLTF
 			for (var submesh = 0; submesh < meshObj.subMeshCount; submesh++)
 			{
 				var primitive = new MeshPrimitive();
-				
+
 				var triangles = meshObj.GetTriangles(submesh);
 				primitive.Indices = ExportAccessor(FlipFaces(triangles), true);
 
@@ -420,20 +415,25 @@ namespace UnityGLTF
 				}
 			}
 
-			if (materialObj.HasProperty("_OcclusionMap"))
-			{
-				var occTex = materialObj.GetTexture("_OcclusionMap");
-				if (occTex != null)
-				{
-					material.OcclusionTexture = ExportOcclusionTextureInfo(occTex, materialObj);
-				}
-			}
-
 			switch (materialObj.shader.name)
 			{
 				case "Standard":
 				case "GLTF/GLTFStandard":
 					material.PbrMetallicRoughness = ExportPBRMetallicRoughness(materialObj);
+					if (materialObj.HasProperty("_OcclusionMap"))
+					{
+						var occTex = materialObj.GetTexture("_OcclusionMap");
+						if (occTex != null)
+						{
+							var info = new OcclusionTextureInfo();
+							if (materialObj.HasProperty("_OcclusionStrength"))
+							{
+								info.Strength = materialObj.GetFloat("_OcclusionStrength");
+							}
+							info.Index = material.PbrMetallicRoughness.MetallicRoughnessTexture.Index;
+							material.OcclusionTexture = info;
+						}
+					}
 					break;
 				case "GLTF/GLTFConstant":
 					material.CommonConstant = ExportCommonConstant(materialObj);
@@ -454,8 +454,7 @@ namespace UnityGLTF
 		private NormalTextureInfo ExportNormalTextureInfo(UnityEngine.Texture texture, UnityEngine.Material material)
 		{
 			var info = new NormalTextureInfo();
-
-			info.Index = ExportTexture(texture);
+			info.Index = ExportTexture(GLTFTextureUtils.handleNormalMap((Texture2D)texture));
 
 			if (material.HasProperty("_BumpScale"))
 			{
@@ -523,11 +522,12 @@ namespace UnityGLTF
 			}
 			else if (material.HasProperty("_MetallicGlossMap"))
 			{
-				var mgTex = material.GetTexture("_MetallicGlossMap");
+				var mgTex = material.GetTexture("_MetallicGlossMap") as Texture2D;
 
 				if (mgTex != null)
 				{
-					pbr.MetallicRoughnessTexture = ExportTextureInfo(mgTex);
+					var occTex = (material.HasProperty("_OcclusionMap") ? material.GetTexture("_OcclusionMap") as Texture2D : null);
+					pbr.MetallicRoughnessTexture = ExportTextureInfo(GLTFTextureUtils.packOcclusionMetalRough(mgTex, occTex));
 				}
 			}
 

@@ -225,6 +225,38 @@ namespace UnityGLTF
 			GUI.enabled = true;
 
 			GUILayout.Label("Status: " + _status);
+
+			GUILayout.Label("");
+			GUILayout.Label("");
+			GUILayout.Label("EXPORT");
+			GUILayout.Label("");
+			GUILayout.Label("");
+
+			if (GUILayout.Button("Export Scene"))
+			{
+				var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+				var gameObjects = scene.GetRootGameObjects();
+				var transforms = Array.ConvertAll(gameObjects, gameObject => gameObject.transform);
+
+				var exporter = new GLTFSceneExporter(transforms);
+				var path = "D:/Desktop/toto";// EditorUtility.OpenFolderPanel("glTF Export Path", "", "");
+				exporter.SaveGLTFandBin(path, scene.name);
+			}
+
+			if (GUILayout.Button("Export Selected"))
+			{
+				string name;
+				if (Selection.transforms.Length > 1)
+					name = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+				else if (Selection.transforms.Length == 1)
+					name = Selection.activeGameObject.name;
+				else
+					throw new Exception("No objects selected, cannot export.");
+
+				var exporter = new GLTFSceneExporter(Selection.transforms);
+				var path = "D:/Desktop/toto";// EditorUtility.OpenFolderPanel("glTF Export Path", "", "");
+				exporter.SaveGLTFandBin(path, name);
+			}
 		}
 
 		public void Update()
