@@ -41,15 +41,15 @@ namespace UnityGLTF.Extensions
 		public static void GetTRSProperties(GLTF.Math.Matrix4x4 mat, out Vector3 position, out Quaternion rotation,
 			out Vector3 scale)
 		{
-			position = mat.GetColumn(3);
+			position = mat.GetColumnV3(3);
 
 			scale = new Vector3(
-				mat.GetColumn(0).magnitude,
-				mat.GetColumn(1).magnitude,
-				mat.GetColumn(2).magnitude
+				mat.GetColumnV3(0).magnitude,
+				mat.GetColumnV3(1).magnitude,
+				mat.GetColumnV3(2).magnitude
 			);
 
-			rotation = Quaternion.LookRotation(mat.GetColumn(2), mat.GetColumn(1));
+			rotation = Quaternion.LookRotation(mat.GetColumnV3(2), mat.GetColumnV3(1));
 		}
 
 #if false
@@ -103,8 +103,32 @@ textureObj.wrapMode == TextureWrapMode.Clamp && root.Samplers[i].WrapS == GLTFSe
 			return null;
 		}
 #endif
+		public static Vector4 GetColumn(this GLTF.Math.Matrix4x4 mat, uint columnNum)
+		{
+			switch (columnNum)
+			{
+				case 0:
+					{
+						return new Vector4(mat.M11, mat.M21, mat.M31, mat.M41);
+					}
+				case 1:
+					{
+						return new Vector4(mat.M12, mat.M22, mat.M32, mat.M42);
+					}
+				case 2:
+					{
+						return new Vector4(mat.M13, mat.M23, mat.M33, mat.M43);
+					}
+				case 3:
+					{
+						return new Vector4(mat.M14, mat.M24, mat.M34, mat.M44);
+					}
+				default:
+					throw new System.Exception("column num is out of bounds");
+			}
+		}
 
-		public static Vector3 GetColumn(this GLTF.Math.Matrix4x4 mat, uint columnNum)
+		public static Vector3 GetColumnV3(this GLTF.Math.Matrix4x4 mat, uint columnNum)
 		{
 			switch (columnNum)
 			{
@@ -159,6 +183,11 @@ textureObj.wrapMode == TextureWrapMode.Clamp && root.Samplers[i].WrapS == GLTFSe
 			return outVecArr;
 		}
 
+		public static GLTF.Math.Vector4 ToGLTFVector4(this Vector4 vec4)
+		{
+			return new GLTF.Math.Vector4(vec4.x, vec4.y, vec4.z, vec4.w);
+		}
+
 		public static Vector4 ToUnityVector4(this GLTF.Math.Vector4 vec4)
 		{
 			return new Vector4(vec4.X, vec4.Y, vec4.Z, vec4.W);
@@ -197,6 +226,21 @@ textureObj.wrapMode == TextureWrapMode.Clamp && root.Samplers[i].WrapS == GLTFSe
 		public static Quaternion ToUnityQuaternion(this GLTF.Math.Quaternion quaternion)
 		{
 			return new Quaternion(quaternion.X, quaternion.Y, quaternion.Z, quaternion.W);
+		}
+
+		public static Matrix4x4 ToUnityMatrix(this GLTF.Math.Matrix4x4 matrix)
+		{
+			return new Matrix4x4(matrix.GetColumn(0), matrix.GetColumn(1), matrix.GetColumn(2), matrix.GetColumn(3));
+		}
+
+		public static GLTF.Math.Matrix4x4 ToGLTFMAtrix(this Matrix4x4 matrix)
+		{
+			return new GLTF.Math.Matrix4x4(
+				matrix.GetColumn(0).ToGLTFVector4(),
+				matrix.GetColumn(1).ToGLTFVector4(),
+				matrix.GetColumn(2).ToGLTFVector4(),
+				matrix.GetColumn(3).ToGLTFVector4()
+			);
 		}
 	}
 }

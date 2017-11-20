@@ -1,8 +1,9 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using System.IO;
+using System.Text.RegularExpressions;
+
 
 public class GLTFUtils
 {
@@ -35,6 +36,13 @@ public class GLTFUtils
 	public static string getPathAbsoluteFromProject(string projectPath)
 	{
 		return projectPath.Replace("Assets/", Application.dataPath).Replace(":", "_");
+	}
+
+	public static Regex rgx = new Regex("[^a-zA-Z0-9 -_.]");
+
+	static public string cleanNonAlphanumeric(string s)
+	{
+		return rgx.Replace(s, "");
 	}
 
 	public static List<UnityEngine.Texture2D> splitAndRemoveMetalRoughTexture(Texture2D inputTexture, bool hasOcclusion)
