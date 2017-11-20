@@ -177,9 +177,9 @@ namespace GLTF.Schema
 					case "scenes":
 						root.Scenes = jsonReader.ReadList(() => GLTF.Schema.Scene.Deserialize(root, jsonReader));
 						break;
-/*					case "skins":
+					case "skins":
 						root.Skins = jsonReader.ReadList(() => Skin.Deserialize(root, jsonReader));
-						break;*/
+						break;
 					case "textures":
 						root.Textures = jsonReader.ReadList(() => Texture.Deserialize(root, jsonReader));
 						break;
