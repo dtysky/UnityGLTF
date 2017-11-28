@@ -23,6 +23,22 @@ public class GLTFTextureUtils
 		GL.sRGBWrite = useSRGB;
 	}
 
+	public static void extractMetalRough(Texture2D occlusionMetalRoughMap, string outputPath)
+	{
+		Debug.Log("Extract Metla rough");
+		if (occlusionMetalRoughMap == null)
+		{
+			return;
+		}
+
+		GL.sRGBWrite = true;
+		Material extractMaterial = new Material(Shader.Find(_extractMetalSmooth));
+		extractMaterial.SetTexture("_OcclusionMetallicRoughMap", occlusionMetalRoughMap);
+
+		Texture2D output = processTextureMaterial(occlusionMetalRoughMap, extractMaterial);
+		writeTextureOnDisk(output, outputPath);
+	}
+
 	// IMPORT
 	public static void extractOcclusion(Texture2D occlusionMetalRoughMap, string outputPath)
 	{
@@ -82,8 +98,6 @@ public class GLTFTextureUtils
 
 		Material packMaterial = new Material(Shader.Find(_packOcclusionMetalRough));
 		Texture2D tex = null;
-		int w = -1;
-		int h = -1;
 		if(metallicSmoothnessMap)
 		{
 			tex = metallicSmoothnessMap;
@@ -103,11 +117,11 @@ public class GLTFTextureUtils
 		GL.sRGBWrite = srgb;
 		return result;
 	}
-	
+
 	// CORE
 	private static Texture2D processTextureMaterial(Texture2D texture, Material blitMaterial)
 	{
-		var exportTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGB24, false);
+		var exportTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, false);
 		exportTexture.name = texture.name;
 
 		var renderTexture = RenderTexture.GetTemporary(texture.width, texture.height, 32, RenderTextureFormat.ARGB32);
@@ -116,6 +130,8 @@ public class GLTFTextureUtils
 
 		exportTexture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
 		exportTexture.Apply();
+
+		RenderTexture.ReleaseTemporary(renderTexture);
 
 		return exportTexture;
 	}
@@ -141,7 +157,6 @@ public class GLTFTextureUtils
 		temp.name = texture.name;
 		if (_useOriginalImages)
 		{
-			Debug.Log(AssetDatabase.GetAssetPath(texture));
 			if (AssetDatabase.GetAssetPath(texture).Length > 0)
 			{
 				temp.LoadImage(File.ReadAllBytes(AssetDatabase.GetAssetPath(texture)));
@@ -168,70 +183,5 @@ public class GLTFTextureUtils
 
 		flipMaterial.SetTexture("_TextureToFlip", temp);
 		return processTextureMaterial(temp, flipMaterial);
-	}
-}
-
-public class GLTFTextureWrapper
-{
-	public enum OPERATION
-	{
-		NONE,
-		FLIPY,
-		OCCLUSION_METALIC_ROUGHNESS, 
-		BUMP_TO_NORMAL
-	}
-
-	List<Texture2D> _inputs;
-	OPERATION _operation;
-
-	GLTFTextureWrapper()
-	{
-		_inputs = new List<Texture2D>();
-	}
-
-	public GLTFTextureWrapper(Texture2D texture, OPERATION operation)
-	{
-		_inputs.Add(texture);
-		_operation = operation;
-	}
-
-	public void AddTexture(Texture2D texture)
-	{
-		_inputs.Add(texture);
-	}
-}
-
-public class GLTFTextureManager
-{
-	List<GLTFTextureWrapper> _imagesProcess;
-	GLTFTextureManager()
-	{
-		_imagesProcess = new List<GLTFTextureWrapper>();
-	}
-
-	public int registerSimpleTexture(Texture2D texture, bool flipY = true)
-	{
-		int index = _imagesProcess.Count;
-		_imagesProcess.Add(new GLTFTextureWrapper(texture, (flipY ? GLTFTextureWrapper.OPERATION.FLIPY : GLTFTextureWrapper.OPERATION.NONE)));
-
-		return index;
-	}
-
-	public int registerMetalOcclusionTexture(Texture2D metalSmooth, Texture2D occlusion)
-	{
-		int index = _imagesProcess.Count;
-		GLTFTextureWrapper tw = new GLTFTextureWrapper(metalSmooth, GLTFTextureWrapper.OPERATION.OCCLUSION_METALIC_ROUGHNESS);
-		tw.AddTexture(occlusion);
-
-		_imagesProcess.Add(tw);
-		return index;
-	}
-
-	public int registerNormalMap(Texture2D normalMap)
-	{
-		int index = _imagesProcess.Count;
-		_imagesProcess.Add(new GLTFTextureWrapper(normalMap, GLTFTextureWrapper.OPERATION.BUMP_TO_NORMAL));
-
-		return index;
 	}
 }

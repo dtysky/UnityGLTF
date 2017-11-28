@@ -12,6 +12,7 @@ Shader "GLTF/ExtractMetalSmooth" {
 			 #pragma vertex vert
 			 #pragma fragment frag
 			 #include "UnityCG.cginc"
+			#include "GLTFColorSpace.cginc"
 
 			 struct vertInput {
 			 float4 pos : POSITION;
@@ -23,28 +24,21 @@ Shader "GLTF/ExtractMetalSmooth" {
 			 float2 texcoord : TEXCOORD0;
 			 };
 
-			 sampler2D _MetallicGlossMap;
-			 sampler2D _OcclusionMap;
+			 sampler2D _OcclusionMetallicRoughMap;
 			 int _FlipY;
 
 			 vertOutput vert(vertInput input) {
 				 vertOutput o;
 				 o.pos = UnityObjectToClipPos(input.pos);
-				 if (_FlipY == 1)
-					 o.texcoord.y = 1.0 - input.texcoord.y;
-				 else
-					 o.texcoord.y = input.texcoord.y;
+				 o.texcoord = input.texcoord;
 
 				 return o;
 			 }
 
-			 half4 frag(vertOutput output) : COLOR {
-			 	half4 final = half4(0.0, 0.0, 0.0 ,1.0);
-			 	final.r = tex2D(_OcclusionMap, output.texcoord).r;
-				final.g = 1.0f - tex2D(_MetallicGlossMap, output.texcoord).a;
-				final.b = tex2D(_MetallicGlossMap, output.texcoord).r;
-
-			 	final.a = 1.0f;
+			 float4 frag(vertOutput output) : COLOR {
+				float4 final = float4(1.0, 1.0, 1.0, 1.0);
+				final.rgb = tex2D(_OcclusionMetallicRoughMap, output.texcoord).bbb;
+				final.a = 1.0 - tex2D(_OcclusionMetallicRoughMap, output.texcoord).g;
 
 			 	return final;
 			 }

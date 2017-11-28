@@ -7,50 +7,95 @@ using UnityGLTF.Cache;
 
 public class AssetManager
 {
+	// Files/Directories
 	protected string _importDirectory;
 	protected string _importMeshesDirectory;
 	protected string _importMaterialsDirectory;
 	protected string _importTexturesDirectory;
-	protected string _prefabName;
+	public List<string> _generatedFiles;
 
-	Dictionary<int, UnityEngine.Object> _registeredAsset;
-	List<Object> _assetsToSerialize;
-
-	// Store generated data
+	// Store generated 
+	public List<GameObject> _createdGameObjects;
 	public List<List<KeyValuePair<Mesh, Material>>> _parsedMeshData;
 	public List<Material> _parsedMaterials;
 	public List<Texture2D> _parsedImages;
 	public List<Texture2D> _parsedTextures;
-	public List<Texture2D> _parsedFinalTextures;
 	public List<int> _usedSources;
-	public AssetManager(string projectDirectoryPath, string glTFUrl)
+	private Object _prefab;
+
+	public AssetManager(string projectDirectoryPath)
 	{
 		// Prepare hierarchy un project
 		_importDirectory = projectDirectoryPath;
-		_registeredAsset = new Dictionary<int, Object>();
-		_assetsToSerialize = new List<Object>();
+		Directory.CreateDirectory(_importDirectory);
 
-		_importTexturesDirectory = _importDirectory + "/textures";
+		_importTexturesDirectory = Path.Combine(_importDirectory, "textures");
 		Directory.CreateDirectory(_importTexturesDirectory);
 
-		_importMeshesDirectory = _importDirectory + "/meshes";
+		_importMeshesDirectory = Path.Combine(_importDirectory, "meshes");
 		Directory.CreateDirectory(_importMeshesDirectory);
 
-		_importMaterialsDirectory = _importDirectory + "/materials";
+		_importMaterialsDirectory = Path.Combine(_importDirectory, "materials");
 		Directory.CreateDirectory(_importMaterialsDirectory);
 
-		_prefabName = Path.GetFileNameWithoutExtension(glTFUrl);
-
+		_createdGameObjects = new List<GameObject>();
 		_parsedMeshData = new List<List<KeyValuePair<Mesh, Material>>>();
 		_parsedMaterials = new List<Material>();
 		_parsedImages = new List<Texture2D>();
 		_parsedTextures = new List<Texture2D>();
 		_usedSources = new List<int>();
+		_generatedFiles = new List<string>();
 	}
 
-	public void addAssetToSerialize(Object asset)
+	public void softClean()
 	{
-		_assetsToSerialize.Add(asset);
+		_parsedMeshData.Clear();
+		_parsedImages.Clear();
+		_parsedTextures.Clear();
+		_parsedMaterials.Clear();
+		_usedSources.Clear();
+
+		for (int i = 0; i < _createdGameObjects.Count; ++i)
+		{
+			Object.DestroyImmediate(_createdGameObjects[i]);
+		}
+		_createdGameObjects.Clear();
+		AssetDatabase.Refresh(); // also triggers Resources.UnloadUnusedAssets()
+	}
+
+	public void addModelToScene()
+	{
+		PrefabUtility.InstantiatePrefab(_prefab);
+	}
+
+	public void hardClean()
+	{
+		softClean();
+
+		for(int i=0; i < _createdGameObjects.Count; ++i)
+		{
+			Object.DestroyImmediate(_createdGameObjects[i]);
+		}
+
+		GLTFUtils.removeFileList(_generatedFiles.ToArray());
+		AssetDatabase.Refresh(); // also triggers Resources.UnloadUnusedAssets()
+
+		// Remove directories if empty
+		GLTFUtils.removeEmptyDirectory(_importMeshesDirectory);
+		GLTFUtils.removeEmptyDirectory(_importTexturesDirectory);
+		GLTFUtils.removeEmptyDirectory(_importMaterialsDirectory);
+		_createdGameObjects.Clear();
+
+		AssetDatabase.Refresh(); // also triggers Resources.UnloadUnusedAssets()
+		GLTFUtils.removeEmptyDirectory(_importDirectory);
+		AssetDatabase.Refresh(); // also triggers Resources.UnloadUnusedAssets()
+	}
+
+	public GameObject createGameObject(string name)
+	{
+		GameObject go = new GameObject(name);
+		_createdGameObjects.Add(go);
+		return go;
 	}
 
 	public void addPrimitiveMeshData(int meshIndex, int primitiveIndex, UnityEngine.Mesh mesh, UnityEngine.Material material)
@@ -81,6 +126,11 @@ public class AssetManager
 	public UnityEngine.Material getMaterial(int index)
 	{
 		return _parsedMaterials[index];
+	}
+
+	public string getImportTextureDir()
+	{
+		return _importTexturesDirectory;
 	}
 
 	public UnityEngine.Texture2D getTexture(int index)
@@ -124,75 +174,9 @@ public class AssetManager
 		_parsedTextures.Add(texture);
 	}
 
-	public Mesh saveMesh(Mesh mesh, string objectName = "Scene")
+	public string generateName(string name, int index)
 	{
-		if(!_registeredAsset.ContainsKey(mesh.GetInstanceID()))
-		{
-			string meshProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importMeshesDirectory) + "/" + objectName + "_" + _registeredAsset.Count + ".asset";
-			meshProjectPath = meshProjectPath.Replace(":", "_");
-			AssetDatabase.CreateAsset(mesh, meshProjectPath);
-			AssetDatabase.Refresh();
-			_registeredAsset.Add(mesh.GetInstanceID(), AssetDatabase.LoadAssetAtPath(meshProjectPath, typeof(Mesh)));
-		}
-		return (Mesh) _registeredAsset[mesh.GetInstanceID()];
-	}
-
-	public Texture2D saveTexture(Texture2D texture, int index, string imageName="")
-	{
-		string textureAbsolutePath = _importTexturesDirectory + "/" + texture.name + "_" + index;
-		string textureProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importTexturesDirectory) + "/" +texture.name + "_" + index;
-		if (texture.format == TextureFormat.ARGB32)
-		{
-			byte[] textureData = texture.EncodeToPNG();
-			File.WriteAllBytes(textureAbsolutePath + ".png", textureData);
-			AssetDatabase.Refresh();
-			textureProjectPath = textureProjectPath + ".png";
-		}
-		else
-		{
-			byte[] textureData = texture.EncodeToJPG(100);
-			File.WriteAllBytes(textureAbsolutePath +".jpg", textureData);
-			AssetDatabase.Refresh();
-			textureProjectPath  = textureProjectPath + ".jpg";
-		}
-
-		return (Texture2D)AssetDatabase.LoadAssetAtPath(textureProjectPath, typeof(Texture2D));
-	}
-
-	public Material saveMaterial(Material material, int index)
-	{
-		if (!_registeredAsset.ContainsKey(material.GetInstanceID()))
-		{
-			string name = material.name.Length > 0 ? material.name.Replace("/", "_").Replace(":","_") : "material";
-			string materialProjectPath = GLTFUtils.getPathProjectFromAbsolute(_importMaterialsDirectory) + "/" + name + "_" + index + ".mat";
-
-			if (!File.Exists(GLTFUtils.getPathAbsoluteFromProject(materialProjectPath)))
-			{
-				AssetDatabase.CreateAsset(material, materialProjectPath);
-				AssetDatabase.Refresh();
-			}
-
-			Material unityMaterial = (Material)AssetDatabase.LoadAssetAtPath(materialProjectPath, typeof(Material));
-			_registeredAsset.Add(material.GetInstanceID(), unityMaterial);
-		}
-
-		return (Material) _registeredAsset[material.GetInstanceID()];
-	}
-
-	private void collectWholeTree(Transform transform, ref List<Transform> collected)
-	{
-		foreach(Transform tr in transform)
-		{
-			collected.Add(tr);
-			collectWholeTree(tr, ref collected);
-		}
-	}
-
-	public void savePrefab(GameObject sceneObject, string _importDirectory)
-	{
-		string prefabPathInProject = GLTFUtils.getPathProjectFromAbsolute(_importDirectory);
-		Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject + "/" + _prefabName + ".prefab");
-		PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.ConnectToPrefab);
+		return GLTFUtils.cleanNonAlphanumeric(name + "_" + index);
 	}
 
 	public void registerImageFromData(byte[] imageData, int imageID, string imageName="")
@@ -201,8 +185,7 @@ public class AssetManager
 		texture.name = imageName;
 		texture.LoadImage(imageData);
 
-		Texture2D importedTexture = saveTexture(GLTFTextureUtils.flipTexture(texture), imageID);
-		_parsedImages.Add(importedTexture);
+		saveTexture(GLTFTextureUtils.flipTexture(texture), imageID);
 	}
 
 	public void copyAndRegisterImageInProject(string inputImage, int imageID)
@@ -213,6 +196,76 @@ public class AssetManager
 		GL.sRGBWrite = true;
 		registerImageFromData(imageData, imageID, imageName);
 		GL.sRGBWrite = srgb;
+	}
+
+	// File serialization
+	public Mesh saveMesh(Mesh mesh, string objectName = "Scene")
+	{
+		string baseName = GLTFUtils.cleanNonAlphanumeric(objectName + ".asset");
+		string fullPath = Path.Combine(_importMeshesDirectory, baseName);
+		string meshProjectPath = GLTFUtils.getPathProjectFromAbsolute(fullPath);
+
+		if (!File.Exists(fullPath))
+		{
+			AssetDatabase.CreateAsset(mesh, meshProjectPath);
+			_generatedFiles.Add(fullPath);
+			AssetDatabase.Refresh();
+		}
+
+		return AssetDatabase.LoadAssetAtPath(meshProjectPath, typeof(Mesh)) as Mesh;
+	}
+
+	public Texture2D saveTexture(Texture2D texture, int index = -1, string imageName = "")
+	{
+		byte[] textureData = texture.format == TextureFormat.ARGB32 ? texture.EncodeToPNG() : texture.EncodeToJPG();
+		string basename = GLTFUtils.cleanNonAlphanumeric(texture.name + "_" + (index >= 0 ? index.ToString() : "") + (texture.format == TextureFormat.ARGB32 ? ".png" : ".jpg"));
+		string fullPath = Path.Combine(_importTexturesDirectory, basename);
+
+		// Write texture
+		if (!File.Exists(fullPath))
+		{
+			File.WriteAllBytes(fullPath, textureData);
+			_generatedFiles.Add(fullPath);
+			AssetDatabase.Refresh();
+		}
+
+		// Reload as asset
+		string projectPath = GLTFUtils.getPathProjectFromAbsolute(fullPath);
+		Texture2D tex = (Texture2D)AssetDatabase.LoadAssetAtPath(projectPath, typeof(Texture2D));
+		_parsedImages.Add(tex);
+		return tex;
+	}
+
+	public Material saveMaterial(Material material, int index)
+	{
+		string baseName = generateName(material.name.Length > 0 ? material.name : "material", index) + ".mat";
+		string materialAssetPath = Path.Combine(_importMaterialsDirectory, baseName);
+		string materialProjectPath = GLTFUtils.getPathProjectFromAbsolute(materialAssetPath);
+
+		// Write material asset
+		if (!File.Exists(materialAssetPath))
+		{
+			AssetDatabase.CreateAsset(material, materialProjectPath);
+			_generatedFiles.Add(materialAssetPath);
+			AssetDatabase.Refresh();
+		}
+
+		// Reload as asset
+		return (Material)AssetDatabase.LoadAssetAtPath(materialProjectPath, typeof(Material));
+	}
+
+	public void savePrefab(GameObject sceneObject, string _importDirectory)
+	{
+		string baseName = GLTFUtils.cleanNonAlphanumeric(sceneObject.name.Length > 0 ? sceneObject.name : "GlTF") + ".prefab";
+		string fullPath = Path.Combine(_importDirectory, baseName);
+		string prefabPathInProject = GLTFUtils.getPathProjectFromAbsolute(fullPath);
+		if (!File.Exists(fullPath))
+		{
+			Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject);
+			_generatedFiles.Add(fullPath);
+			PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.ConnectToPrefab);
+			_prefab = prefab;
+		}
 	}
 }
 

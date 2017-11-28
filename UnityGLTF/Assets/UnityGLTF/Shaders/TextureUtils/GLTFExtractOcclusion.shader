@@ -12,6 +12,7 @@ Shader "GLTF/ExtractOcclusion" {
 			 #pragma vertex vert
 			 #pragma fragment frag
 			 #include "UnityCG.cginc"
+			#include "GLTFColorSpace.cginc"
 
 			 struct vertInput {
 			 float4 pos : POSITION;
@@ -29,16 +30,13 @@ Shader "GLTF/ExtractOcclusion" {
 			 vertOutput vert(vertInput input) {
 				 vertOutput o;
 				 o.pos = UnityObjectToClipPos(input.pos);
-				 if (_FlipY == 1)
-					 o.texcoord.y = 1.0 - input.texcoord.y;
-				 else
-					 o.texcoord.y = input.texcoord.y;
+				 o.texcoord = input.texcoord;
 
 				 return o;
 			 }
 
 			 float4 frag(vertOutput output) : COLOR {
-			 	float4 final = half4(1.0, 1.0, 1.0 ,1.0);
+			 	float4 final = float4(1.0, 1.0, 1.0 ,1.0);
 			 	final.rgb = tex2D(_OcclusionMetallicRoughMap, output.texcoord).rrr;
 			 	final.a = 1.0f;
 

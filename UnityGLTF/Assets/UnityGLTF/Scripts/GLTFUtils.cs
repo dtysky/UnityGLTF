@@ -3,7 +3,8 @@ using UnityEngine;
 using UnityEditor;
 using System.IO;
 using System.Text.RegularExpressions;
-
+using Ionic.Zip;
+using System;
 
 public class GLTFUtils
 {
@@ -28,14 +29,33 @@ public class GLTFUtils
 		AlbedoAlpha,
 	}
 
+	public static Transform[] getSceneTransforms()
+	{
+		var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+		var gameObjects = scene.GetRootGameObjects();
+		return Array.ConvertAll(gameObjects, gameObject => gameObject.transform);
+	}
+
+	public static Transform[] getSelectedTransforms()
+	{
+		if (Selection.transforms.Length <= 0)
+			throw new Exception("No objects selected, cannot export.");
+
+		return Selection.transforms;
+	}
+
+	public static string unifyPathSeparator(string path)
+	{
+		return path.Replace("\\\\", "/").Replace("\\", "/");
+	}
 	public static string getPathProjectFromAbsolute(string absolutePath)
 	{
-		return absolutePath.Replace(Application.dataPath, "Assets").Replace(":", "_");
+		return unifyPathSeparator(absolutePath.Replace(Application.dataPath, "Assets"));
 	}
 
 	public static string getPathAbsoluteFromProject(string projectPath)
 	{
-		return projectPath.Replace("Assets/", Application.dataPath).Replace(":", "_");
+		return unifyPathSeparator(projectPath.Replace("Assets/", Application.dataPath));
 	}
 
 	public static Regex rgx = new Regex("[^a-zA-Z0-9 -_.]");
@@ -45,66 +65,132 @@ public class GLTFUtils
 		return rgx.Replace(s, "");
 	}
 
-	public static List<UnityEngine.Texture2D> splitAndRemoveMetalRoughTexture(Texture2D inputTexture, bool hasOcclusion)
+	static public bool isValidMeshObject(GameObject gameObject)
 	{
-		List<UnityEngine.Texture2D> outputs = new List<UnityEngine.Texture2D>();
-		int width = inputTexture.width;
-		int height = inputTexture.height;
-
-		Color[] occlusion = new Color[width * height];
-		Color[] metalRough = new Color[width * height];
-		Color[] textureColors = new Color[width * height];
-
-		getPixelsFromTexture(ref inputTexture, out textureColors);
-
-		for (int i = 0; i < height; ++i)
-		{
-			for (int j = 0; j < width; ++j)
-			{
-				float occ = textureColors[i * width + j].r;
-				float rough = textureColors[i * width + j].g;
-				float met = textureColors[i * width + j].b;
-
-				occlusion[i * width + j] = new Color(occ, occ, occ, 1.0f);
-				metalRough[i * width + j] = new Color(met, met, met, 1.0f - rough);
-			}
-		}
-
-		Texture2D metalRoughTexture = new Texture2D(width, height);
-		metalRoughTexture.SetPixels(metalRough);
-		metalRoughTexture.Apply();
-
-		//write textures
-		string inputTexturePath = AssetDatabase.GetAssetPath(inputTexture);
-		string metalRoughPath = Path.GetDirectoryName(inputTexturePath) + "/" + Path.GetFileNameWithoutExtension(inputTexturePath) + "_metal" + Path.GetExtension(inputTexturePath);
-		File.WriteAllBytes(metalRoughPath, metalRoughTexture.EncodeToPNG());
-		string occlusionPath = "";
-		if (hasOcclusion)
-		{
-			Texture2D occlusionTexture = new Texture2D(width, height);
-			occlusionTexture.SetPixels(occlusion);
-			occlusionTexture.Apply();
-
-			occlusionPath = Path.GetDirectoryName(inputTexturePath) + "/" + Path.GetFileNameWithoutExtension(inputTexturePath) + "_occlusion" + Path.GetExtension(inputTexturePath);
-			File.WriteAllBytes(occlusionPath, occlusionTexture.EncodeToPNG());
-		}
-
-		// Delete original texture
-		AssetDatabase.DeleteAsset(inputTexturePath);
-		AssetDatabase.Refresh();
-
-		Texture2D metalTexture = (Texture2D)AssetDatabase.LoadAssetAtPath(metalRoughPath, typeof(Texture2D));
-		outputs.Add(metalTexture);
-		if (hasOcclusion)
-		{
-			Texture2D occlusionTextureOutput = (Texture2D)AssetDatabase.LoadAssetAtPath(occlusionPath, typeof(Texture2D));
-			outputs.Add(occlusionTextureOutput);
-		}
-
-		return outputs;
+		return gameObject.GetComponent<MeshFilter>() != null && gameObject.GetComponent<MeshFilter>().sharedMesh != null ||
+			   gameObject.GetComponent<SkinnedMeshRenderer>() != null && gameObject.GetComponent<SkinnedMeshRenderer>().sharedMesh != null;
 	}
 
-	private static bool getPixelsFromTexture(ref Texture2D texture, out Color[] pixels)
+	public static void removeEmptyDirectory(string directoryPath)
+	{
+		if (!Directory.Exists(directoryPath))
+			return;
+
+		DirectoryInfo info = new DirectoryInfo(directoryPath);
+		if (info.GetFiles().Length == 0)
+			Directory.Delete(directoryPath, true);
+	}
+
+	public static void removeFileList(string[] fileList)
+	{
+		foreach(string file in fileList)
+		{
+			if (File.Exists(file))
+				File.Delete(file);
+		}
+	}
+
+	public static Matrix4x4 convertMatrixLeftToRightHandedness(Matrix4x4 mat)
+	{
+		Vector3 position = mat.GetColumn(3);
+		convertVector3LeftToRightHandedness(ref position);
+		Quaternion rotation = Quaternion.LookRotation(mat.GetColumn(2), mat.GetColumn(1));
+		convertQuatLeftToRightHandedness(ref rotation);
+
+		Vector3 scale = new Vector3(mat.GetColumn(0).magnitude, mat.GetColumn(1).magnitude, mat.GetColumn(2).magnitude);
+		float epsilon = 0.00001f;
+
+		// Some issues can occurs with non uniform scales
+		if (Mathf.Abs(scale.x - scale.y) > epsilon || Mathf.Abs(scale.y - scale.z) > epsilon || Mathf.Abs(scale.x - scale.z) > epsilon)
+		{
+			Debug.LogWarning("A matrix with non uniform scale is being converted from left to right handed system. This code is not working correctly in this case");
+		}
+
+		// Handle negative scale component in matrix decomposition
+		if (Matrix4x4.Determinant(mat) < 0)
+		{
+			Quaternion rot = Quaternion.LookRotation(mat.GetColumn(2), mat.GetColumn(1));
+			Matrix4x4 corr = Matrix4x4.TRS(mat.GetColumn(3), rot, Vector3.one).inverse;
+			Matrix4x4 extractedScale = corr * mat;
+			scale = new Vector3(extractedScale.m00, extractedScale.m11, extractedScale.m22);
+		}
+
+		// convert transform values from left handed to right handed
+		mat.SetTRS(position, rotation, scale);
+		Debug.Log("INVERSIOON");
+		return mat;
+	}
+
+	public static void convertVector3LeftToRightHandedness(ref Vector3 vect)
+	{
+		vect.z = -vect.z;
+	}
+
+	public static void convertVector4LeftToRightHandedness(ref Vector4 vect)
+	{
+		vect.z = -vect.z;
+		vect.w = -vect.w;
+	}
+
+	public static void convertQuatLeftToRightHandedness(ref Quaternion quat)
+	{
+		quat.w = -quat.w;
+		quat.z = -quat.z;
+	}
+
+	/// Specifies the path and filename for the GLTF Json and binary
+	/// </summary>
+	/// <param name="filesToZip">Dictionnary where keys are original absolute file paths, and value is directory in zip</param>
+	/// <param name="zipPath">Path of the output zip archive</param>
+	/// <param name="deleteOriginals">Remove original files after building the zip</param>
+	public static void buildZip(Dictionary<string, string> filesToZip, string zipPath, bool deleteOriginals)
+	{
+		if(filesToZip.Count == 0)
+		{
+			Debug.LogError("GLTFUtils: no files to zip");
+		}
+
+		ZipFile zip = new ZipFile();
+		Debug.Log(filesToZip.Count + " files to zip");
+
+		foreach (string originFilePath in filesToZip.Keys)
+		{
+			if(!File.Exists(originFilePath))
+			{
+				Debug.LogError("GLTFUtils.buildZip: File " + originFilePath +" not found.");
+			}
+
+			zip.AddFile(originFilePath, filesToZip[originFilePath]);
+		}
+		try
+		{
+			zip.Save(zipPath);
+		}
+		catch(IOException e)
+		{
+			Debug.LogError("Failed to save zip file." + e);
+		}
+
+		// Remove all files
+		if(deleteOriginals)
+		{
+			foreach (string pa in filesToZip.Keys)
+			{
+				if (System.IO.File.Exists(pa))
+					System.IO.File.Delete(pa);
+			}
+
+			Debug.Log("Files have been cleaned");
+		}
+	}
+
+	public static string buildImageName(Texture2D image)
+	{
+		string imageName = image.GetInstanceID().ToString().Replace("-", "") + "_" + image.name + ".png";
+		return imageName;
+	}
+
+	public static bool getPixelsFromTexture(ref Texture2D texture, out Color[] pixels)
 	{
 		//Make texture readable
 		TextureImporter im = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter;
@@ -118,6 +204,8 @@ public class GLTFUtils
 		TextureImporterCompression format = im.textureCompression;
 		TextureImporterType type = im.textureType;
 		bool isConvertedBump = im.convertToNormalmap;
+		bool srgb = im.sRGBTexture;
+		im.sRGBTexture = false;
 
 		if (!readable)
 			im.isReadable = true;
@@ -137,6 +225,7 @@ public class GLTFUtils
 		if (isConvertedBump)
 			im.convertToNormalmap = true;
 
+		im.sRGBTexture = srgb;
 		im.textureCompression = format;
 		im.SaveAndReimport();
 
@@ -237,4 +326,98 @@ public class GLTFUtils
 			else
 				m.DisableKeyword(keyword);
 		}
+		public static int MAX_VERTICES = 65535;
+
+		public static Vector3[][] splitArray(Vector3[] input, int nbElements)
+		{
+			int nbOutputs = input.Length / nbElements + 1;
+			Vector3[][] output = new Vector3[nbOutputs][];
+			for(int i =0; i < nbOutputs; ++i)
+			{
+				int nbElts = (int)Mathf.Min(nbElements, Mathf.Abs(i * nbElements - input.Length));
+				output[i] = new Vector3[nbElts];
+				Debug.Log(nbElts + " for " + i * nbElements + " to " + input.Length);
+				Array.Copy(input, i * nbElements, output[i], 0, nbElts - 1);
+			}
+
+			return output;
+		}
+
+	public static Vector2[][] splitArray(Vector2[] input, int nbElements)
+	{
+		int nbOutputs = input.Length / nbElements + 1;
+		Vector2[][] output = new Vector2[nbOutputs][];
+		for (int i = 0; i < nbOutputs; ++i)
+		{
+			output[i] = new Vector2[MAX_VERTICES];
+			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
+		}
+
+		return output;
 	}
+
+	public static Vector4[][] splitArray(Vector4[] input, int nbElements)
+	{
+		int nbOutputs = input.Length / nbElements + 1;
+		Vector4[][] output = new Vector4[nbOutputs][];
+		for (int i = 0; i < nbOutputs; ++i)
+		{
+			output[i] = new Vector4[MAX_VERTICES];
+			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
+		}
+
+		return output;
+	}
+
+	public static Color[][] splitArray(Color[] input, int nbElements)
+	{
+		int nbOutputs = input.Length / nbElements + 1;
+		Color[][] output = new Color[nbOutputs][];
+		for (int i = 0; i < nbOutputs; ++i)
+		{
+			output[i] = new Color[MAX_VERTICES];
+			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
+		}
+
+		return output;
+	}
+
+	public static void splitTriangles(int[] triangles, int threshold)
+	{
+		int nbOutputs = (Mathf.Max(triangles) / threshold) + 1;
+		int[][] output = new int[nbOutputs][];
+		int nbAdded = 0;
+		for(int i=0; i < nbOutputs; ++i)
+		{
+			int lowerBound = i - 1 * threshold;
+			int upperBound = i * threshold;
+			List<int> newTriList = new List<int>(splitTriangles(triangles, lowerBound, upperBound));
+			output[i] = newTriList.ToArray();
+			nbAdded += newTriList.Count;
+		}
+		Debug.Log("NB added " + nbAdded + "  vs total " + triangles.Length);
+	}
+
+	public static int[] splitTriangles(int[] triangles, int lowThreshold, int highThreshold)
+	{
+		List<int> output = new List<int>();
+		for(int i = 0; i < triangles.Length - 2; i += 3)
+		{
+			if(isInInterval(lowThreshold, highThreshold, triangles[i]) 
+				&& isInInterval(lowThreshold, highThreshold, triangles[i +1]) 
+				&& isInInterval(lowThreshold, highThreshold, triangles[i +2]))
+			{
+				output.Add(triangles[i] - i * lowThreshold);
+				output.Add(triangles[i+1] - i * lowThreshold);
+				output.Add(triangles[i+2] - i * lowThreshold);
+			}
+		}
+
+		return output.ToArray(); ;
+	}
+
+	public static bool isInInterval(int lower, int upper, int value)
+	{
+		return value < upper && value >= lower;
+	}
+}

@@ -22,20 +22,17 @@ namespace UnityGLTF.Extensions
 				localScale = node.Scale.ToUnityVector3();
 			}
 
-			position = new Vector3(localPosition.x, localPosition.y, -localPosition.z);
-			rotation = new Quaternion(-localRotation.x, -localRotation.y, localRotation.z, localRotation.w);
+			position = localPosition.switchHandedness();
+			rotation = localRotation.switchHandedness();
 			scale = new Vector3(localScale.x, localScale.y, localScale.z);
-			// normally you would flip scale.z here too, but that's done in Accessor
 		}
 
 		public static void SetUnityTransform(this Node node, Transform transform)
 		{
-			node.Translation = new GLTF.Math.Vector3(transform.localPosition.x, transform.localPosition.y,
-				-transform.localPosition.z);
-			node.Rotation = new GLTF.Math.Quaternion(-transform.localRotation.x, -transform.localRotation.y,
-				transform.localRotation.z, transform.localRotation.w);
+			node.Translation = new GLTF.Math.Vector3(transform.localPosition.x, transform.localPosition.y, -transform.localPosition.z);
+			node.Rotation = new GLTF.Math.Quaternion(transform.localRotation.x, transform.localRotation.y, -transform.localRotation.z, -transform.localRotation.w);
 			node.Scale = new GLTF.Math.Vector3(transform.localScale.x, transform.localScale.y, transform.localScale.z);
-		}
+		}	
 
 		// todo: move to utility class
 		public static void GetTRSProperties(GLTF.Math.Matrix4x4 mat, out Vector3 position, out Quaternion rotation,
@@ -241,6 +238,49 @@ textureObj.wrapMode == TextureWrapMode.Clamp && root.Samplers[i].WrapS == GLTFSe
 				matrix.GetColumn(2).ToGLTFVector4(),
 				matrix.GetColumn(3).ToGLTFVector4()
 			);
+		}
+
+		public static Vector3 switchHandedness(this Vector3 input)
+		{
+			return new Vector3(input.x, input.y, -input.z);
+		}
+
+		public static Vector4 switchHandedness(this Vector4 input)
+		{
+			return new Vector4(input.x, input.y, -input.z, -input.w);
+		}
+
+
+		public static Quaternion switchHandedness(this Quaternion input)
+		{
+			return new Quaternion(input.x, input.y, -input.z, -input.w);
+		}
+
+		public static Matrix4x4 switchHandedness(this Matrix4x4 matrix)
+		{
+			Vector3 position = matrix.GetColumn(3).switchHandedness();
+			Quaternion rotation = Quaternion.LookRotation(matrix.GetColumn(2), matrix.GetColumn(1)).switchHandedness();
+			Vector3 scale = new Vector3(matrix.GetColumn(0).magnitude, matrix.GetColumn(1).magnitude, matrix.GetColumn(2).magnitude);
+
+			float epsilon = 0.00001f;
+
+			// Some issues can occurs with non uniform scales
+			if (Mathf.Abs(scale.x - scale.y) > epsilon || Mathf.Abs(scale.y - scale.z) > epsilon || Mathf.Abs(scale.x - scale.z) > epsilon)
+			{
+				Debug.LogWarning("A matrix with non uniform scale is being converted from left to right handed system. This code is not working correctly in this case");
+			}
+
+			// Handle negative scale component in matrix decomposition
+			if (Matrix4x4.Determinant(matrix) < 0)
+			{
+				Quaternion rot = Quaternion.LookRotation(matrix.GetColumn(2), matrix.GetColumn(1));
+				Matrix4x4 corr = Matrix4x4.TRS(matrix.GetColumn(3), rot, Vector3.one).inverse;
+				Matrix4x4 extractedScale = corr * matrix;
+				scale = new Vector3(extractedScale.m00, extractedScale.m11, extractedScale.m22);
+			}
+
+			// convert transform values from left handed to right handed
+			return Matrix4x4.TRS(position, rotation, scale);
 		}
 	}
 }

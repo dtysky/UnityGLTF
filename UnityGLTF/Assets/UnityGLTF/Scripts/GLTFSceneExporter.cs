@@ -5,6 +5,7 @@ using GLTF.Schema;
 using UnityEngine;
 using UnityGLTF.Extensions;
 
+
 //Added
 using UnityEditor;
 
@@ -12,6 +13,7 @@ namespace UnityGLTF
 {
 	public class GLTFSceneExporter
 	{
+		public static string EXPORTER_VERSION = "3.0.0";
 		private Transform[] _rootTransforms;
 		private GLTFRoot _root;
 		private BufferId _bufferId;
@@ -24,6 +26,8 @@ namespace UnityGLTF
 		private List<Transform> _animatedNodes;
 		private List<Transform> _skinnedNodes;
 
+		private Dictionary<string, string> _exportedFiles;
+
 		protected struct PrimKey
 		{
 			public UnityEngine.Mesh Mesh;
@@ -32,7 +36,23 @@ namespace UnityGLTF
 		private readonly Dictionary<PrimKey, MeshId> _primOwner = new Dictionary<PrimKey, MeshId>();
 		private readonly Dictionary<UnityEngine.Mesh, MeshPrimitive[]> _meshToPrims = new Dictionary<UnityEngine.Mesh, MeshPrimitive[]>();
 
-		public bool ExportNames = true;
+		public bool ExportNames = false;
+
+		/// <summary>
+		/// Create a GLTFExporter that exports out a transform
+		/// </summary>
+		public GLTFSceneExporter()
+		{
+			initializeStructures();
+		}
+
+		/// <summary>
+		/// Create a GLTFExporter that exports out a transform
+		/// </summary>
+		public GLTFSceneExporter(string generator)
+		{
+			initializeStructures(generator);
+		}
 
 		/// <summary>
 		/// Create a GLTFExporter that exports out a transform
@@ -40,15 +60,29 @@ namespace UnityGLTF
 		/// <param name="rootTransforms">Root transform of object to export</param>
 		public GLTFSceneExporter(Transform[] rootTransforms)
 		{
+			initializeStructures();
 			_rootTransforms = rootTransforms;
+		}
+
+		public void setTransforms(Transform[] rootTransforms)
+		{
+			_rootTransforms = rootTransforms;
+		}
+
+		private void initializeStructures(string generator = "")
+		{
 			_exportedTransforms = new Dictionary<int, int>();
 			_animatedNodes = new List<Transform>();
 			_skinnedNodes = new List<Transform>();
-			_root = new GLTFRoot {
+			_exportedFiles = new Dictionary<string, string>();
+			_root = new GLTFRoot
+			{
 				Accessors = new List<Accessor>(),
 				Animations = new List<GLTF.Schema.Animation>(),
-				Asset = new Asset {
-					Version = "2.0"
+				Asset = new Asset
+				{
+					Version = "2.0",
+					Generator = "UnityGLTF (" + Application.unityVersion + ")"
 				},
 				Buffers = new List<GLTF.Schema.Buffer>(),
 				BufferViews = new List<BufferView>(),
@@ -67,7 +101,8 @@ namespace UnityGLTF
 			_textures = new List<UnityEngine.Texture>();
 
 			_buffer = new GLTF.Schema.Buffer();
-			_bufferId = new BufferId {
+			_bufferId = new BufferId
+			{
 				Id = _root.Buffers.Count,
 				Root = _root
 			};
@@ -82,6 +117,16 @@ namespace UnityGLTF
 			return _root;
 		}
 
+		public Dictionary<string, string> getExportedFilesList()
+		{
+			return _exportedFiles;
+		}
+
+		public void clear()
+		{
+			initializeStructures();
+		}
+
 		/// <summary>
 		/// Specifies the path and filename for the GLTF Json and binary
 		/// </summary>
@@ -89,17 +134,21 @@ namespace UnityGLTF
 		/// <param name="fileName">The name of the GLTF file</param>
 		public void SaveGLTFandBin(string path, string fileName)
 		{
-			var binFile = File.Create(Path.Combine(path, fileName + ".bin"));
+			string binPath = Path.Combine(path, fileName + ".bin");
+			var binFile = File.Create(binPath);
 			_bufferWriter = new BinaryWriter(binFile);
 
 			_root.Scene = ExportScene(fileName, _rootTransforms);
 
 			// Export animation
+			GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
+			anim.Name = "Take 001";
 			for (int i = 0; i < _animatedNodes.Count; ++i)
 			{
 				Transform t = _animatedNodes[i];
-				exportAnimationFromNode(ref t);
+				exportAnimationFromNode(ref t, ref anim);
 			}
+			_root.Animations.Add(anim);
 
 			// Export skins
 			for (int i = 0; i < _skinnedNodes.Count; ++i)
@@ -111,7 +160,10 @@ namespace UnityGLTF
 			_buffer.Uri = fileName + ".bin";
 			_buffer.ByteLength = (int)_bufferWriter.BaseStream.Length;
 
-			var gltfFile = File.CreateText(Path.Combine(path, fileName + ".gltf"));
+			_exportedFiles.Add(binPath, "");
+
+			string gltfPath = Path.Combine(path, fileName + ".gltf");
+			var gltfFile = File.CreateText(gltfPath);
 			_root.Serialize(gltfFile);
 
 #if WINDOWS_UWP
@@ -121,12 +173,14 @@ namespace UnityGLTF
 			gltfFile.Close();
 			binFile.Close();
 #endif
+			_exportedFiles.Add(gltfPath, "");
 			GL.sRGBWrite = true;
 			foreach (var image in _images)
 			{
 				//Should filter regarding channel that use it
-				string outputPath = Path.Combine(path, image.name + ".png");
+				string outputPath = Path.Combine(path, GLTFUtils.buildImageName(image));
 				GLTFTextureUtils.writeTextureOnDisk(GLTFTextureUtils.flipTexture(image), outputPath);
+				_exportedFiles.Add(outputPath, "");
 			}
 		}
 
@@ -214,7 +268,7 @@ namespace UnityGLTF
 			{
 				_skinnedNodes.Add(nodeTransform);
 			}
-	
+
 			node.SetUnityTransform(nodeTransform);
 
 			var id = new NodeId {
@@ -224,7 +278,7 @@ namespace UnityGLTF
 
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
 
-			_root.Nodes.Add(node);			
+			_root.Nodes.Add(node);
 
 			// children that are primitives get put in a mesh
 			GameObject[] primitives, nonPrimitives;
@@ -260,9 +314,7 @@ namespace UnityGLTF
 			var nonPrims = new List<GameObject>(childCount);
 
 			// add another primitive if the root object also has a mesh
-			if (transform.gameObject.GetComponent<MeshFilter>() != null
-				&& transform.gameObject.GetComponent<MeshRenderer>() != null
-				|| transform.gameObject.GetComponent<SkinnedMeshRenderer>() != null)
+			if (GLTFUtils.isValidMeshObject(transform.gameObject))
 			{
 				prims.Add(transform.gameObject);
 			}
@@ -292,8 +344,7 @@ namespace UnityGLTF
 				&& gameObject.transform.localPosition == Vector3.zero
 				&& gameObject.transform.localRotation == Quaternion.identity
 				&& gameObject.transform.localScale == Vector3.one
-				&& gameObject.GetComponent<MeshFilter>() != null
-				&& gameObject.GetComponent<MeshRenderer>() != null;
+				&& GLTFUtils.isValidMeshObject(gameObject);
 		}
 
 		private MeshId ExportMesh(string name, GameObject[] primitives)
@@ -372,13 +423,13 @@ namespace UnityGLTF
 			AccessorId aPosition = null, aNormal = null, aTangent = null,
 				aTexcoord0 = null, aTexcoord1 = null, aColor0 = null;
 
-			aPosition = ExportAccessor(InvertZ(meshObj.vertices));
+			aPosition = ExportAccessor(meshObj.vertices, true);
 
 			if (meshObj.normals.Length != 0)
-				aNormal = ExportAccessor(InvertZ(meshObj.normals));
+				aNormal = ExportAccessor(meshObj.normals, true);
 
 			if (meshObj.tangents.Length != 0)
-				aTangent = ExportAccessor(InvertW(meshObj.tangents));
+				aTangent = ExportAccessor(meshObj.tangents, true);
 
 			if (meshObj.uv.Length != 0)
 				aTexcoord0 = ExportAccessor(meshObj.uv);
@@ -511,6 +562,10 @@ namespace UnityGLTF
 						}
 					}
 					break;
+				case "Standard (Specular setup)":
+					KHR_materials_pbrSpecularGlossinessExtension pbr = convertSpecular(materialObj);
+					material.Extensions.Add(KHR_materials_pbrSpecularGlossinessExtensionFactory.EXTENSION_NAME, pbr);
+					break;
 				case "GLTF/GLTFConstant":
 					material.CommonConstant = ExportCommonConstant(materialObj);
 					break;
@@ -525,6 +580,33 @@ namespace UnityGLTF
 			_root.Materials.Add(material);
 
 			return id;
+		}
+
+		private KHR_materials_pbrSpecularGlossinessExtension convertSpecular(UnityEngine.Material mat)
+		{
+			GLTF.Math.Color diffuseFactor = mat.GetColor("_Color").ToNumericsColor();
+			TextureInfo diffuseTexture = mat.GetTexture("_MainTex") != null ? ExportTextureInfo(mat.GetTexture("_MainTex")) : null;
+
+			TextureInfo specularGlossinessTexture = null;
+			GLTF.Math.Color specularColor = Color.white.ToNumericsColor();
+			float glossinessFactor = 1.0f;
+			if (mat.GetTexture("_SpecGlossMap"))
+			{
+				specularGlossinessTexture = ExportTextureInfo(mat.GetTexture("_SpecGlossMap"));
+				if(mat.HasProperty("_GlossMapScale"))
+					glossinessFactor = mat.GetFloat("_GlossMapScale");
+			}
+			else
+			{
+				specularColor = mat.GetColor("_SpecColor").ToNumericsColor();
+				if (mat.HasProperty("_Glossiness"))
+					glossinessFactor = mat.GetFloat("_Glossiness");
+			}
+
+			GLTF.Math.Vector3 specularFactor = new GLTF.Math.Vector3(specularColor.R, specularColor.G, specularColor.B);
+
+
+			return new KHR_materials_pbrSpecularGlossinessExtension(diffuseFactor, diffuseTexture, specularFactor, glossinessFactor, specularGlossinessTexture);
 		}
 
 		private NormalTextureInfo ExportNormalTextureInfo(UnityEngine.Texture texture, UnityEngine.Material material)
@@ -690,6 +772,7 @@ namespace UnityGLTF
 
 		private ImageId ExportImage(UnityEngine.Texture texture)
 		{
+			string imagePath = GLTFUtils.buildImageName((Texture2D)texture);
 			ImageId id = GetImageId(_root, texture);
 			if(id != null)
 			{
@@ -705,7 +788,7 @@ namespace UnityGLTF
 
 			_images.Add(texture as Texture2D);
 
-			image.Uri = Uri.EscapeUriString(texture.name + ".png");
+			image.Uri = imagePath; // Uri.EscapeUriString(imagePath);
 
 			id = new ImageId {
 				Id = _root.Images.Count,
@@ -743,7 +826,7 @@ namespace UnityGLTF
 			}
 			else if(texture.filterMode == FilterMode.Bilinear)
 			{
-				sampler.MinFilter = MinFilterMode.NearestMipmapLinear;
+				sampler.MinFilter = MinFilterMode.Linear;
 				sampler.MagFilter = MagFilterMode.Linear;
 			}
 			else
@@ -1022,7 +1105,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector3[] arr)
+		private AccessorId ExportAccessor(Vector3[] arr, bool switchHandedness=false)
 		{
 			var count = arr.Length;
 
@@ -1079,9 +1162,19 @@ namespace UnityGLTF
 			var byteOffset = _bufferWriter.BaseStream.Position;
 
 			foreach (var vec in arr) {
-				_bufferWriter.Write(vec.x);
-				_bufferWriter.Write(vec.y);
-				_bufferWriter.Write(vec.z);
+				if(switchHandedness)
+				{
+					Vector3 vect = vec.switchHandedness();
+					_bufferWriter.Write(vect.x);
+					_bufferWriter.Write(vect.y);
+					_bufferWriter.Write(vect.z);
+				}
+				else
+				{
+					_bufferWriter.Write(vec.x);
+					_bufferWriter.Write(vec.y);
+					_bufferWriter.Write(vec.z);
+				}
 			}
 
 			var byteLength = _bufferWriter.BaseStream.Position - byteOffset;
@@ -1185,7 +1278,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Vector4[] arr)
+		private AccessorId ExportAccessor(Vector4[] arr, bool switchHandedness=false)
 		{
 			var count = arr.Length;
 
@@ -1252,10 +1345,11 @@ namespace UnityGLTF
 			var byteOffset = _bufferWriter.BaseStream.Position;
 
 			foreach (var vec in arr) {
-				_bufferWriter.Write(vec.x);
-				_bufferWriter.Write(vec.y);
-				_bufferWriter.Write(vec.z);
-				_bufferWriter.Write(vec.w);
+				Vector4 vect = switchHandedness ? vec.switchHandedness() : vec;
+				_bufferWriter.Write(vect.x);
+				_bufferWriter.Write(vect.y);
+				_bufferWriter.Write(vect.z);
+				_bufferWriter.Write(vect.w);
 			}
 
 			var byteLength = _bufferWriter.BaseStream.Position - byteOffset;
@@ -1357,7 +1451,7 @@ namespace UnityGLTF
 			return id;
 		}
 
-		private AccessorId ExportAccessor(Matrix4x4[] arr)
+		private AccessorId ExportAccessor(Matrix4x4[] arr, bool switchHandedness = false)
 		{
 			var count = arr.Length;
 
@@ -1370,16 +1464,17 @@ namespace UnityGLTF
 			accessor.ComponentType = GLTFComponentType.Float;
 			accessor.Count = count;
 			accessor.Type = GLTFAccessorAttributeType.MAT4;
-	
+
 			// Dont serialize min/max for matrices
 
 			var byteOffset = _bufferWriter.BaseStream.Position;
 
 			foreach (var mat in arr)
 			{
+				Matrix4x4 mamat = switchHandedness ? mat.switchHandedness() : mat;
 				for (int i = 0; i < 4; ++i)
 				{
-					Vector4 col = mat.GetColumn(i);
+					Vector4 col = mamat.GetColumn(i);
 					_bufferWriter.Write(col.x);
 					_bufferWriter.Write(col.y);
 					_bufferWriter.Write(col.z);
@@ -1507,7 +1602,7 @@ namespace UnityGLTF
 			QUATERNION,
 			EULER
 		};
-		
+
 		private struct TargetCurveSet
 		{
 			public AnimationCurve[] translationCurves;
@@ -1529,7 +1624,7 @@ namespace UnityGLTF
 		static bool bake = true;
 
 		// Parses Animation/Animator component and generate a glTF animation for the active clip
-		public void exportAnimationFromNode(ref Transform transform)
+		public void exportAnimationFromNode(ref Transform transform, ref GLTF.Schema.Animation anim)
 		{
 			Animator a = transform.GetComponent<Animator>();
 			if (a != null)
@@ -1538,8 +1633,6 @@ namespace UnityGLTF
 				for (int i = 0; i < clips.Length; i++)
 				{
 					//FIXME It seems not good to generate one animation per animator.
-					GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
-					anim.Name = GLTFUtils.cleanNonAlphanumeric(clips[i].name);
 					convertClipToGLTFAnimation(ref clips[i], ref transform, ref anim);
 					_root.Animations.Add(anim);
 				}
@@ -1552,8 +1645,6 @@ namespace UnityGLTF
 				for (int i = 0; i < clips.Length; i++)
 				{
 					//FIXME It seems not good to generate one animation per animator.
-					GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
-					anim.Name = GLTFUtils.cleanNonAlphanumeric(clips[i].name);
 					convertClipToGLTFAnimation(ref clips[i], ref transform, ref anim);
 					_root.Animations.Add(anim);
 				}
@@ -1597,8 +1688,11 @@ namespace UnityGLTF
 				foreach (string target in targetCurvesBinding.Keys)
 				{
 					Transform targetTr = target.Length > 0 ? transform.Find(target) : transform;
-					if (targetTr == null)
+					if (targetTr == null || targetTr.GetComponent<SkinnedMeshRenderer>())
+					{
 						continue;
+					}
+						
 
 					// Initialize data
 					// Bake and populate animation data
@@ -1625,7 +1719,7 @@ namespace UnityGLTF
 
 					AnimationSampler Tsampler = new AnimationSampler();
 					Tsampler.Input = timeAccessor;
-					Tsampler.Output = ExportAccessor(positions); // Vec3 for translation
+					Tsampler.Output = ExportAccessor(positions, true); // Vec3 for translation
 					Tchannel.Sampler = new SamplerId
 					{
 						Id = animation.Samplers.Count,
@@ -1649,7 +1743,7 @@ namespace UnityGLTF
 
 					AnimationSampler Rsampler = new AnimationSampler();
 					Rsampler.Input = timeAccessor; // Float, for time
-					Rsampler.Output = ExportAccessor(rotations); // Vec4 for 
+					Rsampler.Output = ExportAccessor(rotations, true); // Vec4 for
 					Rchannel.Sampler = new SamplerId
 					{
 						Id = animation.Samplers.Count,
@@ -1837,7 +1931,6 @@ namespace UnityGLTF
 			SkinnedMeshRenderer skin = transform.GetComponent<SkinnedMeshRenderer>();
 			GLTF.Schema.Skin gltfSkin = new Skin();
 
-			int[] jointIds = new int[skin.bones.Length];
 			for (int i = 0; i < skin.bones.Length; ++i)
 			{
 				gltfSkin.Joints.Add(
@@ -1848,7 +1941,7 @@ namespace UnityGLTF
 					});
 			}
 
-			gltfSkin.InverseBindMatrices = ExportAccessor(mesh.bindposes);
+			gltfSkin.InverseBindMatrices = ExportAccessor(mesh.bindposes, true);
 
 			Vector4[] bones = boneWeightToBoneVec4(mesh.boneWeights);
 			Vector4[] weights = boneWeightToWeightVec4(mesh.boneWeights);
@@ -1856,8 +1949,10 @@ namespace UnityGLTF
 			GLTF.Schema.Mesh gltfMesh = _root.Meshes[val.Id];
 			foreach(MeshPrimitive prim in gltfMesh.Primitives)
 			{
-				prim.Attributes.Add("JOINTS_0", ExportAccessorUint(bones));
-				prim.Attributes.Add("WEIGHTS_0", ExportAccessor(weights));
+				if(!prim.Attributes.ContainsKey("JOINTS_0"))
+					prim.Attributes.Add("JOINTS_0", ExportAccessorUint(bones));
+				if (!prim.Attributes.ContainsKey("WEIGHTS_0"))
+					prim.Attributes.Add("WEIGHTS_0", ExportAccessor(weights));
 			}
 
 			_root.Nodes[_exportedTransforms[transform.GetInstanceID()]].Skin = new SkinId() { Id = _root.Skins.Count, Root = _root };
