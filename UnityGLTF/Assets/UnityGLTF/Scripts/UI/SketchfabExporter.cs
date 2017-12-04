@@ -10,14 +10,14 @@ using System;
 using UnityEditor.SceneManagement;
 using UnityGLTF;
 
-public class ExporterSKFB : EditorWindow
+public class SketchfabExporter : EditorWindow
 {
 
 	[MenuItem("Sketchfab/Publish to Sketchfab %_f")]
 	static void Init()
 	{
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX // edit: added Platform Dependent Compilation - win or osx standalone
-		ExporterSKFB window = (ExporterSKFB)EditorWindow.GetWindow(typeof(ExporterSKFB));
+		SketchfabExporter window = (SketchfabExporter)EditorWindow.GetWindow(typeof(SketchfabExporter));
 		window.titleContent.text = "Sketchfab";
 		window.Show();
 #else // and error dialog if not standalone
@@ -33,25 +33,7 @@ public class ExporterSKFB : EditorWindow
 	[SerializeField]
 	Vector2 descSize = new Vector2(603, 175);
 
-	// Fields limits
-	const int NAME_LIMIT = 48;
-	const int DESC_LIMIT = 1024;
-	const int TAGS_LIMIT = 50;
-	const int PASSWORD_LIMIT = 64;
-	const int SPACE_SIZE = 5;
-
-	private string exporterVersion = GLTFSceneExporter.EXPORTER_VERSION;
-	private string latestVersion = "0.0.1";
-
-	// Exporter UI: static elements
-	[SerializeField]
-	Texture2D header;
-	GUIStyle exporterTextArea;
-	GUIStyle exporterLabel;
-	GUIStyle exporterClickableLabel;
-	private string clickableLabelColor = "navy";
-
-	Sketchfab.SketchfabApi _api;
+	Sketchfab.SketchfabAPI _api;
 	private string exportPath;
 	private string zipPath;
 
@@ -72,16 +54,11 @@ public class ExporterSKFB : EditorWindow
 
 	// Exporter UI: dynamic elements
 	private string status = "";
-	private Color blueColor = new Color(69 / 255.0f, 185 / 255.0f, 223 / 255.0f);
-	private Color redColor = new Color(0.8f, 0.0f, 0.0f);
-	private Color greyColor = Color.white;
+
 	// Disabled 
 	//Dictionary<string, string> categories = new Dictionary<string, string>();
 	//List<string> categoriesNames = new List<string>();
 	Rect windowRect;
-
-	private bool isLatestVersion = true;
-	private bool checkVersionFailed = false;
 
 	//private List<String> tagList;
 	void Awake()
@@ -91,19 +68,20 @@ public class ExporterSKFB : EditorWindow
 		resizeWindow(loginSize);
 	}
 
-	void setupApi()
+	void setupAPI()
 	{
-		_api = new Sketchfab.SketchfabApi("Unity-exporter");
+		_api = new Sketchfab.SketchfabAPI("Unity-exporter");
 
 		//Setup callbacks
+		_api.setCheckVersionSuccessCb(OnCheckVersionSuccess);
+		_api.setCheckVersionFailedCb(OnCheckVersionFailure);
 		_api.setTokenRequestFailedCb(OnAuthenticationFail);
 		_api.setTokenRequestSuccessCb(OnAuthenticationSuccess);
-		_api.setCheckVersionSuccessCb(OnCheckVersionSuccess);
 		_api.setCheckUserAccountSuccessCb(OnCheckUserAccountSuccess);
 		_api.setUploadSuccessCb(OnUploadSuccess);
 		_api.setUploadFailedCb(OnUploadFailed);
-		_api.checkLatestExporterVersion();
 	}
+
 	void OnEnable()
 	{
 		// Pre-fill model name with scene name if empty
@@ -111,6 +89,11 @@ public class ExporterSKFB : EditorWindow
 		{
 			param_name = EditorSceneManager.GetActiveScene().name;
 		}
+
+		SketchfabPlugin.Initialize();
+		setupAPI();
+
+		_api.checkLatestExporterVersion();
 		resizeWindow(loginSize);
 		relog();
 	}
@@ -127,7 +110,21 @@ public class ExporterSKFB : EditorWindow
 
 	void OnUploadFailed()
 	{
+		EditorUtility.DisplayDialog("Upload Error", "An error occured when uploading the model:\n" + _api.getLastError(), "Ok");
+	}
 
+	void OnCheckVersionSuccess()
+	{
+		Debug.Log("Latest version is " + _api.getLatestVersion());
+		if(!_api.isLatestVersion())
+		{
+			SketchfabPlugin.DisplayVersionPopup();
+		}
+	}
+
+	void OnCheckVersionFailure()
+	{
+		Debug.Log("Failed to retrieve Plugin version");
 	}
 
 	void OnSelectionChange()
@@ -148,28 +145,6 @@ public class ExporterSKFB : EditorWindow
 	void OnCheckUserAccountSuccess()
 	{
 		_api.requestUserCanPrivate();
-	}
-
-	void OnCheckVersionSuccess()
-	{
-		if (exporterVersion == _api.getLatestVersion())
-		{
-			isLatestVersion = true;
-		}
-		else
-		{
-			bool update = EditorUtility.DisplayDialog("Exporter update", "A new version is available \n(you have version " + exporterVersion + ")\nIt's strongly rsecommended that you update now. The latest version may include important bug fixes and improvements", "Update", "Skip");
-			if (update)
-			{
-				Application.OpenURL(Sketchfab.SketchfabUrls.latestRelease);
-			}
-			isLatestVersion = false;
-		}
-	}
-
-	void OnCheckVersionFailed()
-	{
-		checkVersionFailed = true;
 	}
 
 	void resizeWindow(Vector2 size)
@@ -203,12 +178,12 @@ public class ExporterSKFB : EditorWindow
 	{
 		status = "";
 
-		if (param_name.Length > NAME_LIMIT)
+		if (param_name.Length > SketchfabPlugin.NAME_LIMIT)
 		{
 			status = "Model name is too long";
 			return false;
 		}
-
+	
 
 		if (param_name.Length == 0)
 		{
@@ -217,14 +192,14 @@ public class ExporterSKFB : EditorWindow
 		}
 
 
-		if (param_description.Length > DESC_LIMIT)
+		if (param_description.Length > SketchfabPlugin.DESC_LIMIT)
 		{
 			status = "Model description is too long";
 			return false;
 		}
 
 
-		if (param_tags.Length > TAGS_LIMIT)
+		if (param_tags.Length > SketchfabPlugin.TAGS_LIMIT)
 		{
 			status = "Model tags are too long";
 			return false;
@@ -244,34 +219,12 @@ public class ExporterSKFB : EditorWindow
 
 	private void checkValidity()
 	{
-		if (exporterLabel == null)
-		{
-			exporterLabel = new GUIStyle(GUI.skin.label);
-			exporterLabel.richText = true;
-		}
-
-		if (exporterTextArea == null)
-		{
-			exporterTextArea = new GUIStyle(GUI.skin.textArea);
-			exporterTextArea.fixedWidth = descSize.x;
-			exporterTextArea.fixedHeight = descSize.y;
-		}
-
-		if (exporterClickableLabel == null)
-		{
-			exporterClickableLabel = new GUIStyle(EditorStyles.centeredGreyMiniLabel);
-			exporterClickableLabel.richText = true;
-		}
+		SketchfabPlugin.CheckValidity((int)descSize.x, (int)descSize.y);
 
 		if(_api == null)
 		{
-			setupApi();
+			setupAPI();
 		}
-	}
-
-	private string makeTextRed(string text)
-	{
-		return "<color=" + clickableLabelColor + ">" + text + "</color>";
 	}
 
 	private void Update()
@@ -285,12 +238,7 @@ public class ExporterSKFB : EditorWindow
 	void OnGUI()
 	{
 		checkValidity();
-		//Header
-		GUILayout.BeginHorizontal();
-		GUILayout.FlexibleSpace();
-		GUILayout.Label(header);
-		GUILayout.FlexibleSpace();
-		GUILayout.EndHorizontal();
+		SketchfabPlugin.showHeader();
 
 		// Account settings
 		if (!_api.isUserAuthenticated())
@@ -299,43 +247,29 @@ public class ExporterSKFB : EditorWindow
 		}
 		else
 		{
-			if (checkVersionFailed)
-			{
-				showVersionCheckError();
-			}
-			else if (isLatestVersion)
-			{
-				showUpToDate();
-			}
-			else
-			{
-				showOutdatedVersionWarning();
-			}
+			displayVersionInfo();
 
 			GUILayout.BeginHorizontal("Box");
-			GUILayout.Label("Account: <b>" + _api.getCurrentUserDisplayName() + ( _api.getCurrentUserPlanLabel().Length > 0 ? "</b> (" + _api.getCurrentUserPlanLabel() + " account)" : ""), exporterLabel);
+			GUILayout.Label("Account: <b>" + _api.getCurrentUserDisplayName() + (_api.getCurrentUserPlanLabel().Length > 0 ? "</b> (" + _api.getCurrentUserPlanLabel() + " account)" : ""), SketchfabPlugin.SkfbLabel);
 			if (GUILayout.Button("Logout"))
 			{
 				_api.logoutUser();
 				resizeWindow(loginSize);
 			}
 			GUILayout.EndHorizontal();
-		}
 
-		GUILayout.Space(SPACE_SIZE);
+			GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 
-		if (_api.isUserAuthenticated())
-		{
 			showModelProperties();
-			GUILayout.Space(SPACE_SIZE);
+			GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 			showPrivateSetting();
 			showOptions();
 
 			bool enable = updateExporterStatus();
 			if (enable)
-				GUI.color = blueColor;
+				GUI.color = SketchfabPlugin.BLUE_COLOR;
 			else
-				GUI.color = greyColor;
+				GUI.color = SketchfabPlugin.GREY_COLOR;
 
 			if (_api.getUploadProgress() >= 0.0f)
 			{
@@ -368,50 +302,20 @@ public class ExporterSKFB : EditorWindow
 		}
 	}
 
-	private void showVersionCheckError()
+	public void displayVersionInfo()
 	{
-		Color current = GUI.color;
-		GUI.color = Color.red;
-		GUILayout.Label("An error occured when looking for the latest exporter version\nYou might be using an old and not fully supported version", EditorStyles.centeredGreyMiniLabel);
-		if (GUILayout.Button("Click here to be redirected to release page"))
+		if (_api.getLatestVersion() == null)
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.latestRelease);
+			SketchfabPlugin.showVersionCheckError();
 		}
-		GUI.color = current;
-	}
-
-	private void showOutdatedVersionWarning()
-	{
-		Color current = GUI.color;
-		GUI.color = redColor;
-		GUILayout.Label("New version " + latestVersion + " available (current version is " + exporterVersion + ")", EditorStyles.centeredGreyMiniLabel);
-		GUILayout.BeginHorizontal();
-		GUILayout.FlexibleSpace();
-		if (GUILayout.Button("Go to release page", GUILayout.Width(150), GUILayout.Height(25)))
+		else if (_api.isLatestVersion())
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.latestRelease);
+			SketchfabPlugin.showUpToDate(_api.getLatestVersion());
 		}
-		GUILayout.FlexibleSpace();
-		GUILayout.EndHorizontal();
-		GUI.color = current;
-	}
-
-	private void showUpToDate()
-	{
-		GUILayout.BeginHorizontal();
-		GUILayout.Label("Exporter is up to date (version:" + exporterVersion + ")", EditorStyles.centeredGreyMiniLabel);
-
-		GUILayout.FlexibleSpace();
-		if (GUILayout.Button("<color=" + clickableLabelColor + ">Help  -</color>", exporterClickableLabel, GUILayout.Height(20)))
+		else
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.latestRelease);
+			SketchfabPlugin.showOutdatedVersionWarning(_api.getLatestVersion());
 		}
-
-		if (GUILayout.Button("<color=" + clickableLabelColor + ">Report an issue</color>", exporterClickableLabel, GUILayout.Height(20)))
-		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.reportAnIssue);
-		}
-		GUILayout.EndHorizontal();
 	}
 
 	private void showModelProperties()
@@ -422,14 +326,14 @@ public class ExporterSKFB : EditorWindow
 		// Model name
 		GUILayout.Label("Name");
 		param_name = EditorGUILayout.TextField(param_name);
-		GUILayout.Label("(" + param_name.Length + "/" + NAME_LIMIT + ")", EditorStyles.centeredGreyMiniLabel);
+		GUILayout.Label("(" + param_name.Length + "/" + SketchfabPlugin.NAME_LIMIT + ")", EditorStyles.centeredGreyMiniLabel);
 		EditorStyles.textField.wordWrap = true;
-		GUILayout.Space(SPACE_SIZE);
+		GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 
 		GUILayout.Label("Description");
-		param_description = EditorGUILayout.TextArea(param_description, exporterTextArea);
+		param_description = EditorGUILayout.TextArea(param_description, SketchfabPlugin.SkfbTextArea);
 		GUILayout.Label("(" + param_description.Length + " / 1024)", EditorStyles.centeredGreyMiniLabel);
-		GUILayout.Space(SPACE_SIZE);
+		GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 		GUILayout.Label("Tags (separated by spaces)");
 		param_tags = EditorGUILayout.TextField(param_tags);
 		GUILayout.Label("'unity' and 'unity3D' added automatically (" + param_tags.Length + "/50)", EditorStyles.centeredGreyMiniLabel);
@@ -444,9 +348,9 @@ public class ExporterSKFB : EditorWindow
 			GUILayout.BeginHorizontal();
 			param_private = EditorGUILayout.Toggle("Private model", param_private);
 
-			if (GUILayout.Button("(<color=" + clickableLabelColor + ">more info</color>)", exporterClickableLabel, GUILayout.Height(20)))
+			if (GUILayout.Button("( " + SketchfabPlugin.ClickableTextColor("more info") + ")", SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 			{
-				Application.OpenURL(Sketchfab.SketchfabUrls.privateInfo);
+				Application.OpenURL(SketchfabPlugin.Urls.privateInfo);
 			}
 
 			GUILayout.FlexibleSpace();
@@ -461,16 +365,16 @@ public class ExporterSKFB : EditorWindow
 		{
 			if (_api.getCurrentUserPlanLabel() == "BASIC")
 			{
-				if (GUILayout.Button("(<color=" + clickableLabelColor + ">Upgrade to a paid account to set your model to private</color>)", exporterClickableLabel, GUILayout.Height(20)))
+				if (GUILayout.Button("(" + SketchfabPlugin.ClickableTextColor("Upgrade to a paid account to set your model to private") +")", SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 				{
-					Application.OpenURL(Sketchfab.SketchfabUrls.plans);
+					Application.OpenURL(SketchfabPlugin.Urls.plans);
 				}
 			}
 			else
 			{
-				if (GUILayout.Button("(<color=" + clickableLabelColor + ">You cannot set any other model to private (limit reached)</color>)", exporterClickableLabel, GUILayout.Height(20)))
+				if (GUILayout.Button("(" + SketchfabPlugin.ClickableTextColor("You cannot set any other model to private (limit reached)") + ")", SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 				{
-					Application.OpenURL(Sketchfab.SketchfabUrls.plans);
+					Application.OpenURL(SketchfabPlugin.Urls.plans);
 				}
 			}
 		}
@@ -490,18 +394,18 @@ public class ExporterSKFB : EditorWindow
 
 		GUILayout.BeginHorizontal();
 		param_autopublish = EditorGUILayout.Toggle("Publish immediately ", param_autopublish);
-		if (GUILayout.Button("(<color=" + clickableLabelColor + ">more info</color>)", exporterClickableLabel, GUILayout.Height(20)))
+		if (GUILayout.Button("(" + SketchfabPlugin.ClickableTextColor("more info") + ")", SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.latestRelease);
+			Application.OpenURL(SketchfabPlugin.Urls.latestRelease);
 		}
 		GUILayout.FlexibleSpace();
 		GUILayout.EndHorizontal();
-		//GUILayout.Space(SPACE_SIZE);
+		//GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 
 		//if (categories.Count > 0)
 		//	categoryIndex = EditorGUILayout.Popup(categoryIndex, categoriesNames.ToArray());
 
-		//GUILayout.Space(SPACE_SIZE);
+		//GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 	}
 
 	private void proceedToExportAndUpload()
@@ -542,17 +446,18 @@ public class ExporterSKFB : EditorWindow
 
 		GUILayout.BeginHorizontal();
 		GUILayout.FlexibleSpace();
-		if (GUILayout.Button("<color=" + clickableLabelColor + ">Create an account  - </color>", exporterClickableLabel, GUILayout.Height(20)))
+		
+		if (GUILayout.Button(SketchfabPlugin.ClickableTextColor("Create an account"), SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.createAccount);
+			Application.OpenURL(SketchfabPlugin.Urls.createAccount);
 		}
-		if (GUILayout.Button("<color=" + clickableLabelColor + ">Reset your password  - </color>", exporterClickableLabel, GUILayout.Height(20)))
+		if (GUILayout.Button(SketchfabPlugin.ClickableTextColor("Reset your password"), SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.resetPassword);
+			Application.OpenURL(SketchfabPlugin.Urls.resetPassword);
 		}
-		if (GUILayout.Button("<color=" + clickableLabelColor + ">Report an issue</color>", exporterClickableLabel, GUILayout.Height(20)))
+		if (GUILayout.Button(SketchfabPlugin.ClickableTextColor("Report an issue"), SketchfabPlugin.SkfbClickableLabel, GUILayout.Height(20)))
 		{
-			Application.OpenURL(Sketchfab.SketchfabUrls.reportAnIssue);
+			Application.OpenURL(SketchfabPlugin.Urls.reportAnIssue);
 		}
 		GUILayout.EndHorizontal();
 		GUILayout.BeginHorizontal();

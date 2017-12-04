@@ -12,39 +12,19 @@ using UnityGLTF;
 
 namespace Sketchfab
 {
-	struct SketchfabUrls
+	public class SketchfabAPI
 	{
-		public static string server = "https://sketchfab.com/";
-		public static string latestRelease = "https://github.com/sketchfab/Unity-glTF-Exporter/releases";
-		public static string resetPassword = "https://sketchfab.com/login/reset-password";
-		public static string createAccount = "https://sketchfab.com/signup";
-		public static string reportAnIssue = "https://help.sketchfab.com/hc/en-us/requests/new?type=exporters&subject=Unity+Exporter";
-		public static string privateInfo = "https://help.sketchfab.com/hc/en-us/articles/115000422206-Private-Models";
-		public static string draftInfo = "https://help.sketchfab.com/hc/en-us/articles/115000472906-Draft-Mode";
-		public static string latestReleaseCheck = "https://api.github.com/repos/sketchfab/Unity-glTF-Exporter/releases";
-		public static string plans = "https://sketchfab.com/plans";
-		public static string categories = server + "/v3/categories";
-		private static string dummyClientId = "IUO8d5VVOIUCzWQArQ3VuXfbwx5QekZfLeDlpOmW";
-		public static string oauth = server + "oauth2/token/?grant_type=password&client_id=" + dummyClientId;
-		public static string userMe = server + "/v3/me";
-		public static string userAccount = server + "/v3/me/account";
-		public static string postModel = server + "/v3/models";
-		public static string modelUrl = server + "/models";
-	}
+		public enum ExporterState
+		{
+			IDLE,
+			CHECK_VERSION,
+			REQUEST_CODE,
+			//GET_CATEGORIES,
+			USER_ACCOUNT_TYPE,
+			CAN_PRIVATE,
+			PUBLISH_MODEL
+		}
 
-	public enum ExporterState
-	{
-		IDLE,
-		CHECK_VERSION,
-		REQUEST_CODE,
-		//GET_CATEGORIES,
-		USER_ACCOUNT_TYPE,
-		CAN_PRIVATE,
-		PUBLISH_MODEL
-	}
-
-	public class SketchfabApi
-	{
 		public class SketchfabPlan
 		{
 			public string label;
@@ -105,22 +85,23 @@ namespace Sketchfab
 		// Oauth stuff
 		private float expiresIn = 0;
 		private int lastTokenTime = 0;
-		private string latestVersion;
+		private string _latestVersion;
+		private string _isLatestVersion;
 
 		public delegate void Callback();
-		private Callback _uploadSuccess;
-		private Callback _uploadFailed;
-		private Callback _tokenRequestSuccess;
-		private Callback _tokenRequestFailed;
-		private Callback _checkVersionSuccess;
-		private Callback _checkVersionFailed;
+		public Callback _uploadSuccess;
+		public Callback _uploadFailed;
+		public Callback _tokenRequestSuccess;
+		public Callback _tokenRequestFailed;
+		public Callback _checkVersionSuccess;
+		public Callback _checkVersionFailed;
 
-		private Callback _checkUserAccountSuccess;
-		private Callback _checkUserAccountFailure;
+		public Callback _checkUserAccountSuccess;
+		public Callback _checkUserAccountFailure;
 
 		private string _lastError = "";
 
-		public SketchfabApi(string uploadSource)
+		public SketchfabAPI(string uploadSource = "")
 		{
 			_publisher = new SketchfabRequest(uploadSource);
 			_publisher.setResponseCallback(HandleRequestResponse);
@@ -129,6 +110,11 @@ namespace Sketchfab
 		public bool isUserAuthenticated()
 		{
 			return _access_token.Length > 0;
+		}
+
+		public bool isLatestVersion()
+		{
+			return SketchfabPlugin.VERSION == _latestVersion;
 		}
 
 		//Setup callbacks
@@ -227,7 +213,7 @@ namespace Sketchfab
 
 		public string getLatestVersion()
 		{
-			return latestVersion;
+			return _latestVersion;
 		}
 
 		public string getLastError()
@@ -308,12 +294,12 @@ namespace Sketchfab
 				case ExporterState.CHECK_VERSION:
 					if (jsonResponse != null && jsonResponse[0]["tag_name"] != null)
 					{
-						latestVersion = jsonResponse[0]["tag_name"];
+						_latestVersion = jsonResponse[0]["tag_name"];
 						_checkVersionSuccess();
 					}
 					else
 					{
-						latestVersion = "";
+						_latestVersion = "";
 						_checkVersionFailed();
 					}
 					break;
@@ -336,7 +322,7 @@ namespace Sketchfab
 				case ExporterState.PUBLISH_MODEL:
 					if (www.responseHeaders["STATUS"].Contains("201") == true)
 					{
-						_lastModelUrl = SketchfabUrls.modelUrl + "/" + getUrlId(www.responseHeaders);
+						_lastModelUrl = SketchfabPlugin.Urls.modelUrl + "/" + getUrlId(www.responseHeaders);
 						if (_uploadSuccess != null)
 							_uploadSuccess();
 					}
@@ -427,7 +413,7 @@ namespace Sketchfab
 		{
 			if(_state == ExporterState.PUBLISH_MODEL && _publisher.getResponse() != null)
 			{
-				return 0.99f * _publisher.getResponse().uploadProgress + 0.01f * _publisher.getResponse().progress;
+				return _publisher.getUploadProgress();
 			}
 			else
 			{
@@ -549,7 +535,7 @@ namespace Sketchfab
 			Dictionary<string, string> parameters = new Dictionary<string, string>();
 			parameters.Add("username", user_name);
 			parameters.Add("password", user_password);
-			requestSketchfabAPI(SketchfabUrls.oauth, parameters);
+			requestSketchfabAPI(SketchfabPlugin.Urls.oauth, parameters);
 		}
 
 		public WWW getResponse()
@@ -557,19 +543,31 @@ namespace Sketchfab
 			return www;
 		}
 
+		public float getUploadProgress()
+		{
+			if(www != null)
+			{
+				return 0.99f * www.uploadProgress + 0.01f * www.progress;
+			}
+			else
+			{
+				return -1.0f;
+			}
+		}
+
 		public void requestExporterReleaseInfo()
 		{
-			requestSketchfabAPI(SketchfabUrls.latestReleaseCheck);
+			requestSketchfabAPI(SketchfabPlugin.Urls.latestReleaseCheck);
 		}
 
 		public void requestAccountInfo()
 		{
-			requestSketchfabAPI(SketchfabUrls.userMe);
+			requestSketchfabAPI(SketchfabPlugin.Urls.userMe);
 		}
 
 		public void requestUserCanPrivate()
 		{
-			requestSketchfabAPI(SketchfabUrls.userAccount);
+			requestSketchfabAPI(SketchfabPlugin.Urls.userAccount);
 		}
 
 		public void postModel(Dictionary<string, string> parameters, string filePath)
@@ -581,7 +579,7 @@ namespace Sketchfab
 			}
 
 			byte[] data = File.ReadAllBytes(filePath);
-			requestSketchfabAPI(SketchfabUrls.postModel, parameters, data, filePath);
+			requestSketchfabAPI(SketchfabPlugin.Urls.postModel, parameters, data, filePath);
 		}
 
 		public void requestSketchfabAPI(string url)

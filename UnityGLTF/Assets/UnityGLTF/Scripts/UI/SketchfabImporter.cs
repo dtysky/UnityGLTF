@@ -5,13 +5,13 @@ using UnityEditor;
 using UnityGLTF;
 using Ionic.Zip;
 
-class GLTFEditorImporterWindow : EditorWindow
+class SketchfabImporter : EditorWindow
 {
 	[MenuItem("Tools/Import glTF %_g")]
 	static void Init()
 	{
-#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_LINUX 
-		GLTFEditorImporterWindow window = (GLTFEditorImporterWindow)EditorWindow.GetWindow(typeof(GLTFEditorImporterWindow));
+#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_LINUX
+		SketchfabImporter window = (SketchfabImporter)EditorWindow.GetWindow(typeof(SketchfabImporter));
 		window.titleContent.text = "glTF importer";
 		window.Show(true);
 #else // and error dialog if not standalone
@@ -31,14 +31,58 @@ class GLTFEditorImporterWindow : EditorWindow
 	private List<string> _unzippedFiles;
 	bool _isInitialized = false;
 	GUIStyle _header;
+	Sketchfab.SketchfabAPI _api;
+
+	void setupAPI()
+	{
+		_api = new Sketchfab.SketchfabAPI("Unity-exporter");
+
+		//Setup callbacks
+		_api.setCheckVersionSuccessCb(OnCheckVersionSuccess);
+		_api.setCheckVersionFailedCb(OnCheckVersionFailure);
+		_api.checkLatestExporterVersion();
+	}
 
 	private void Initialize()
 	{
+		SketchfabPlugin.Initialize(); // Load header image
+		setupAPI();
+
 		_importer = new GLTFEditorImporter(this.Repaint);
 		_unzippedFiles = new List<string>();
 		_isInitialized = true;
 		_unzipDirectory = Application.temporaryCachePath + "/unzip";
 		_header = new GUIStyle(EditorStyles.boldLabel);
+	}
+
+	public void displayVersionInfo()
+	{
+		if (_api.getLatestVersion() == null)
+		{
+			SketchfabPlugin.showVersionCheckError();
+		}
+		else if (_api.isLatestVersion())
+		{
+			SketchfabPlugin.showUpToDate(_api.getLatestVersion());
+		}
+		else
+		{
+			SketchfabPlugin.showOutdatedVersionWarning(_api.getLatestVersion());
+		}
+	}
+
+	void OnCheckVersionSuccess()
+	{
+		Debug.Log("Latest version is " + _api.getLatestVersion());
+		if (!_api.isLatestVersion())
+		{
+			SketchfabPlugin.DisplayVersionPopup();
+		}
+	}
+
+	void OnCheckVersionFailure()
+	{
+		Debug.Log("Failed to retrieve Plugin version");
 	}
 
 	private string unzipGltfArchive(string zipPath)
@@ -71,6 +115,11 @@ class GLTFEditorImporterWindow : EditorWindow
 		{
 			Initialize();
 		}
+
+		if (_api == null)
+		{
+			setupAPI();
+		}
 	}
 
 	public void OnDestroy()
@@ -81,7 +130,12 @@ class GLTFEditorImporterWindow : EditorWindow
 
 	public void Update()
 	{
-		if(_importer != null)
+		if (_api != null)
+		{
+			_api.Update();
+		}
+
+		if (_importer != null)
 		{
 			_importer.Update();
 			Repaint();
@@ -94,6 +148,9 @@ class GLTFEditorImporterWindow : EditorWindow
 			Initialize();
 
 		checkValidity();
+
+		SketchfabPlugin.showHeader();
+		displayVersionInfo();
 
 		DragAndDrop.visualMode = DragAndDropVisualMode.Generic;
 		if (Event.current.type == EventType.DragExited)
