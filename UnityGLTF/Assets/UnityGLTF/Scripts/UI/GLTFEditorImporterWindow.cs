@@ -7,10 +7,10 @@ using Ionic.Zip;
 
 class GLTFEditorImporterWindow : EditorWindow
 {
-	[MenuItem("Tools/Import glTF %_e")]
+	[MenuItem("Tools/Import glTF %_g")]
 	static void Init()
 	{
-#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX // edit: added Platform Dependent Compilation - win or osx standalone
+#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_LINUX 
 		GLTFEditorImporterWindow window = (GLTFEditorImporterWindow)EditorWindow.GetWindow(typeof(GLTFEditorImporterWindow));
 		window.titleContent.text = "glTF importer";
 		window.Show(true);
@@ -21,19 +21,14 @@ class GLTFEditorImporterWindow : EditorWindow
 
 	// Public
 	public bool _useGLTFMaterial = false;
-	private bool _userStopped = false;
-	public bool ENABLE_DEBUG = true;
 
-	//Tests
 	private string _defaultImportDirectory = "Import";
 	private static string _currentSampleName = "Imported";
-	private List<string> _unzippedFiles;
-
 	GLTFEditorImporter _importer;
-
 	string _gltfPath = "";
 	string _projectDirectory = "";
 	string _unzipDirectory = "";
+	private List<string> _unzippedFiles;
 	bool _isInitialized = false;
 	GUIStyle _header;
 
@@ -106,6 +101,28 @@ class GLTFEditorImporterWindow : EditorWindow
 			_gltfPath = DragAndDrop.paths[0];
 		}
 
+		showImportUI();
+
+		// Options
+		emptyLines(1);
+		showOptions();
+		emptyLines(1);
+
+		// Disable import if nothing valid to import
+		GUI.enabled = _gltfPath.Length > 0 && File.Exists(_gltfPath);
+
+		// Import button
+		if (GUILayout.Button("IMPORT"))
+		{
+			processImportButton();
+		}
+
+		showStatus();
+	}
+
+	// UI FUNCTIONS
+	private void showImportUI()
+	{
 		// Import file
 		GUILayout.BeginHorizontal();
 		GUILayout.FlexibleSpace();
@@ -124,36 +141,42 @@ class GLTFEditorImporterWindow : EditorWindow
 		GUILayout.Label("Model to import: " + _gltfPath);
 		GUILayout.Label("Import directory: " + _projectDirectory);
 		GUILayout.EndVertical();
+	}
 
-		// Options
-		GUILayout.Label("");
+	private void emptyLines(int nbLines)
+	{
+		for(int i=0; i< nbLines; ++i)
+		{
+			GUILayout.Label("");
+		}
+	}
+
+	private void showOptions()
+	{
 		GUILayout.Label("Options", _header);
 		GUILayout.BeginHorizontal();
 		GUILayout.Label("Prefab name:");
 		_currentSampleName = GUILayout.TextField(_currentSampleName, GUILayout.Width(250));
 		GUILayout.FlexibleSpace();
-		GUILayout.EndHorizontal();
-		_useGLTFMaterial = GUILayout.Toggle(_useGLTFMaterial, "Use GLTF specific shader");
-		GUI.enabled = _gltfPath.Length > 0 && File.Exists(_gltfPath);
+		GUILayout.EndHorizontal();		
+	}
 
-		GUILayout.Label("");
-		GUILayout.Label("");
+	private void processImportButton()
+	{
+		_projectDirectory = EditorUtility.OpenFolderPanel("Choose import directory in Project", Application.dataPath, "Assets");
+		Directory.CreateDirectory(_projectDirectory);
 
-		// Import button
-		if (GUILayout.Button("IMPORT"))
+		if (Path.GetExtension(_gltfPath) == ".zip")
 		{
-			_userStopped = false;
-			_projectDirectory = EditorUtility.OpenFolderPanel("Choose import directory in Project", Application.dataPath, "Assets");
-			Directory.CreateDirectory(_projectDirectory);
-			if(Path.GetExtension(_gltfPath) == ".zip")
-			{
-				_gltfPath = unzipGltfArchive(_gltfPath);
-				Debug.Log(_gltfPath);
-			}
-			_importer.setupForPath(_gltfPath, _projectDirectory, _currentSampleName);
-			_importer.Load();
+			_gltfPath = unzipGltfArchive(_gltfPath);
 		}
 
+		_importer.setupForPath(_gltfPath, _projectDirectory, _currentSampleName);
+		_importer.Load();
+	}
+
+	private void showStatus()
+	{
 		GUI.enabled = true;
 		GUILayout.BeginHorizontal("Box");
 		GUILayout.Label("Status: " + _importer.getStatus());

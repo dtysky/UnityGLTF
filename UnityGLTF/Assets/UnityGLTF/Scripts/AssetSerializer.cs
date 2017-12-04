@@ -14,7 +14,7 @@ public class AssetManager
 	protected string _importTexturesDirectory;
 	public List<string> _generatedFiles;
 
-	// Store generated 
+	// Import data
 	public List<GameObject> _createdGameObjects;
 	public List<List<KeyValuePair<Mesh, Material>>> _parsedMeshData;
 	public List<Material> _parsedMaterials;
@@ -184,7 +184,7 @@ public class AssetManager
 		Texture2D texture = new Texture2D(4, 4);
 		texture.name = imageName;
 		texture.LoadImage(imageData);
-
+		GL.sRGBWrite = true;
 		saveTexture(GLTFTextureUtils.flipTexture(texture), imageID);
 	}
 
@@ -217,20 +217,14 @@ public class AssetManager
 
 	public Texture2D saveTexture(Texture2D texture, int index = -1, string imageName = "")
 	{
-		byte[] textureData = texture.format == TextureFormat.ARGB32 ? texture.EncodeToPNG() : texture.EncodeToJPG();
-		string basename = GLTFUtils.cleanNonAlphanumeric(texture.name + "_" + (index >= 0 ? index.ToString() : "") + (texture.format == TextureFormat.ARGB32 ? ".png" : ".jpg"));
+		string basename = GLTFUtils.cleanNonAlphanumeric(texture.name + (index >= 0 ? "_" + index.ToString() : "") + ".png"); // Extension will be overridden
 		string fullPath = Path.Combine(_importTexturesDirectory, basename);
 
 		// Write texture
-		if (!File.Exists(fullPath))
-		{
-			File.WriteAllBytes(fullPath, textureData);
-			_generatedFiles.Add(fullPath);
-			AssetDatabase.Refresh();
-		}
+		string newAssetPath = GLTFTextureUtils.writeTextureOnDisk(texture, fullPath, true);
 
 		// Reload as asset
-		string projectPath = GLTFUtils.getPathProjectFromAbsolute(fullPath);
+		string projectPath = GLTFUtils.getPathProjectFromAbsolute(newAssetPath);
 		Texture2D tex = (Texture2D)AssetDatabase.LoadAssetAtPath(projectPath, typeof(Texture2D));
 		_parsedImages.Add(tex);
 		return tex;

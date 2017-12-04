@@ -151,8 +151,6 @@ public class GLTFUtils
 		}
 
 		ZipFile zip = new ZipFile();
-		Debug.Log(filesToZip.Count + " files to zip");
-
 		foreach (string originFilePath in filesToZip.Keys)
 		{
 			if(!File.Exists(originFilePath))
@@ -179,15 +177,13 @@ public class GLTFUtils
 				if (System.IO.File.Exists(pa))
 					System.IO.File.Delete(pa);
 			}
-
-			Debug.Log("Files have been cleaned");
 		}
 	}
 
 	public static string buildImageName(Texture2D image)
 	{
-		string imageName = image.GetInstanceID().ToString().Replace("-", "") + "_" + image.name + ".png";
-		return imageName;
+		string extension = GLTFTextureUtils.useJPGTexture(image) ? ".jpg": ".png";
+		return image.GetInstanceID().ToString().Replace("-", "") + "_" + image.name + extension;
 	}
 
 	public static bool getPixelsFromTexture(ref Texture2D texture, out Color[] pixels)
@@ -326,98 +322,4 @@ public class GLTFUtils
 			else
 				m.DisableKeyword(keyword);
 		}
-		public static int MAX_VERTICES = 65535;
-
-		public static Vector3[][] splitArray(Vector3[] input, int nbElements)
-		{
-			int nbOutputs = input.Length / nbElements + 1;
-			Vector3[][] output = new Vector3[nbOutputs][];
-			for(int i =0; i < nbOutputs; ++i)
-			{
-				int nbElts = (int)Mathf.Min(nbElements, Mathf.Abs(i * nbElements - input.Length));
-				output[i] = new Vector3[nbElts];
-				Debug.Log(nbElts + " for " + i * nbElements + " to " + input.Length);
-				Array.Copy(input, i * nbElements, output[i], 0, nbElts - 1);
-			}
-
-			return output;
-		}
-
-	public static Vector2[][] splitArray(Vector2[] input, int nbElements)
-	{
-		int nbOutputs = input.Length / nbElements + 1;
-		Vector2[][] output = new Vector2[nbOutputs][];
-		for (int i = 0; i < nbOutputs; ++i)
-		{
-			output[i] = new Vector2[MAX_VERTICES];
-			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
-		}
-
-		return output;
-	}
-
-	public static Vector4[][] splitArray(Vector4[] input, int nbElements)
-	{
-		int nbOutputs = input.Length / nbElements + 1;
-		Vector4[][] output = new Vector4[nbOutputs][];
-		for (int i = 0; i < nbOutputs; ++i)
-		{
-			output[i] = new Vector4[MAX_VERTICES];
-			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
-		}
-
-		return output;
-	}
-
-	public static Color[][] splitArray(Color[] input, int nbElements)
-	{
-		int nbOutputs = input.Length / nbElements + 1;
-		Color[][] output = new Color[nbOutputs][];
-		for (int i = 0; i < nbOutputs; ++i)
-		{
-			output[i] = new Color[MAX_VERTICES];
-			Array.Copy(input, i * MAX_VERTICES, output[i], 0, Mathf.Min(MAX_VERTICES, Mathf.Abs(i * MAX_VERTICES - input.Length)));
-		}
-
-		return output;
-	}
-
-	public static void splitTriangles(int[] triangles, int threshold)
-	{
-		int nbOutputs = (Mathf.Max(triangles) / threshold) + 1;
-		int[][] output = new int[nbOutputs][];
-		int nbAdded = 0;
-		for(int i=0; i < nbOutputs; ++i)
-		{
-			int lowerBound = i - 1 * threshold;
-			int upperBound = i * threshold;
-			List<int> newTriList = new List<int>(splitTriangles(triangles, lowerBound, upperBound));
-			output[i] = newTriList.ToArray();
-			nbAdded += newTriList.Count;
-		}
-		Debug.Log("NB added " + nbAdded + "  vs total " + triangles.Length);
-	}
-
-	public static int[] splitTriangles(int[] triangles, int lowThreshold, int highThreshold)
-	{
-		List<int> output = new List<int>();
-		for(int i = 0; i < triangles.Length - 2; i += 3)
-		{
-			if(isInInterval(lowThreshold, highThreshold, triangles[i]) 
-				&& isInInterval(lowThreshold, highThreshold, triangles[i +1]) 
-				&& isInInterval(lowThreshold, highThreshold, triangles[i +2]))
-			{
-				output.Add(triangles[i] - i * lowThreshold);
-				output.Add(triangles[i+1] - i * lowThreshold);
-				output.Add(triangles[i+2] - i * lowThreshold);
-			}
-		}
-
-		return output.ToArray(); ;
-	}
-
-	public static bool isInInterval(int lower, int upper, int value)
-	{
-		return value < upper && value >= lower;
-	}
 }

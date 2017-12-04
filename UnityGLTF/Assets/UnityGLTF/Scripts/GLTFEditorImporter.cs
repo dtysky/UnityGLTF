@@ -958,6 +958,8 @@ namespace UnityGLTF
 			obj[0] = sceneObj;
 			Selection.objects = obj;
 			EditorApplication.ExecuteMenuItem("Edit/Frame Selected");
+			_messages.Clear();
+			setStatus("Successfully imported " + _glTFPath);
 			yield return null;
 		}
 

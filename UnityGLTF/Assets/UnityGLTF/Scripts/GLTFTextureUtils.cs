@@ -55,10 +55,15 @@ public class GLTFTextureUtils
 		writeTextureOnDisk(output, outputPath);
 	}
 
-	public static void writeTextureOnDisk(Texture2D texture, string outputPath)
+	public static string writeTextureOnDisk(Texture2D texture, string outputPath, bool updateExtension=false)
 	{
-		File.WriteAllBytes(outputPath, texture.EncodeToPNG());
+		string finalOutputPath = outputPath;
+		byte[] finalImageData = Path.GetExtension(finalOutputPath) == ".jpg" ? texture.EncodeToJPG() : texture.EncodeToPNG();
+
+		File.WriteAllBytes(finalOutputPath, finalImageData);
 		AssetDatabase.Refresh();
+
+		return finalOutputPath;
 	}
 
 	// Export
@@ -119,9 +124,9 @@ public class GLTFTextureUtils
 	}
 
 	// CORE
-	private static Texture2D processTextureMaterial(Texture2D texture, Material blitMaterial)
+	private static Texture2D processTextureMaterial(Texture2D texture, Material blitMaterial, bool isRGB=false)
 	{
-		var exportTexture = new Texture2D(texture.width, texture.height, TextureFormat.ARGB32, false);
+		var exportTexture = new Texture2D(texture.width, texture.height, (isRGB ? TextureFormat.RGB24 : TextureFormat.ARGB32), false);
 		exportTexture.name = texture.name;
 
 		var renderTexture = RenderTexture.GetTemporary(texture.width, texture.height, 32, RenderTextureFormat.ARGB32);
@@ -182,6 +187,70 @@ public class GLTFTextureUtils
 		Texture2D temp = texture;
 
 		flipMaterial.SetTexture("_TextureToFlip", temp);
-		return processTextureMaterial(temp, flipMaterial);
+		return processTextureMaterial(temp, flipMaterial, useJPGTexture(texture));
+	}
+
+	public static bool useJPGTexture(Texture2D texture)
+	{
+		switch(texture.format)
+		{
+			case TextureFormat.RGB24:
+			case TextureFormat.DXT1:
+				return true;
+			default:
+				return false;
+		}
+	}
+}
+
+class GLTFTextureUtilsCache
+{
+	private Dictionary<KeyValuePair<Texture2D, Texture2D>, Texture2D> _packedTextures;
+	//private Dictionary<Texture2D, Texture2D> _extractedOcclusion;
+	//private Dictionary<Texture2D, Texture2D> _extractedMetalSmooth;
+	private Dictionary<Texture2D, Texture2D> _convertedBump;
+	private Dictionary<Texture2D, Texture2D> _flippedTextures;
+
+	public GLTFTextureUtilsCache()
+	{
+		_packedTextures = new Dictionary<KeyValuePair<Texture2D, Texture2D>, Texture2D>();
+		//_extractedOcclusion = new Dictionary<Texture2D, Texture2D>();
+		//_extractedMetalSmooth = new Dictionary<Texture2D, Texture2D>();
+		_convertedBump = new Dictionary<Texture2D, Texture2D>();
+		_flippedTextures = new Dictionary<Texture2D, Texture2D>();
+	}
+
+	public Texture2D packOcclusionMetalRough(Texture2D metalSmooth, Texture2D occlusion)
+	{
+		KeyValuePair<Texture2D, Texture2D> key = new KeyValuePair<Texture2D, Texture2D>(metalSmooth, occlusion);
+		if (!_packedTextures.ContainsKey(key))
+		{
+			Texture2D tex = GLTFTextureUtils.packOcclusionMetalRough(metalSmooth, occlusion);
+			_packedTextures.Add(key, tex);
+		}
+
+		return _packedTextures[key];
+	}
+
+	public Texture2D handleNormalMap(Texture2D texture)
+	{
+		if(!_convertedBump.ContainsKey(texture))
+		{
+			Texture2D tex = GLTFTextureUtils.handleNormalMap(texture);
+			_convertedBump.Add(texture, tex);
+		}
+
+		return _convertedBump[texture];
+	}
+
+	public Texture2D flipTexture(Texture2D texture)
+	{
+		if(!_flippedTextures.ContainsKey(texture))
+		{
+			Texture2D flipped = GLTFTextureUtils.flipTexture(texture);
+			_flippedTextures.Add(texture, flipped);
+		}
+
+		return _flippedTextures[texture];
 	}
 }

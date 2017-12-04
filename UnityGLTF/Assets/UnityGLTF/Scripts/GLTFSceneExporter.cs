@@ -13,7 +13,7 @@ namespace UnityGLTF
 {
 	public class GLTFSceneExporter
 	{
-		public static string EXPORTER_VERSION = "3.0.0";
+		public static string EXPORTER_VERSION = "2.2.0";
 		private Transform[] _rootTransforms;
 		private GLTFRoot _root;
 		private BufferId _bufferId;
@@ -25,7 +25,13 @@ namespace UnityGLTF
 		private Dictionary<int, int> _exportedTransforms;
 		private List<Transform> _animatedNodes;
 		private List<Transform> _skinnedNodes;
+		private Dictionary<SkinnedMeshRenderer, UnityEngine.Mesh> _bakedMeshes;
 
+		// Temporary setting to avoid validation issue 'not multiple of 4' in bufferView.offset
+		private bool _forceIndicesUint = true;
+
+		private bool _exportAnimation = true;
+		private bool _bakeSkinnedMeshes = false;
 		private Dictionary<string, string> _exportedFiles;
 
 		protected struct PrimKey
@@ -36,6 +42,7 @@ namespace UnityGLTF
 		private readonly Dictionary<PrimKey, MeshId> _primOwner = new Dictionary<PrimKey, MeshId>();
 		private readonly Dictionary<UnityEngine.Mesh, MeshPrimitive[]> _meshToPrims = new Dictionary<UnityEngine.Mesh, MeshPrimitive[]>();
 
+		private GLTFTextureUtilsCache _textureCache;
 		public bool ExportNames = false;
 
 		/// <summary>
@@ -58,9 +65,9 @@ namespace UnityGLTF
 		/// Create a GLTFExporter that exports out a transform
 		/// </summary>
 		/// <param name="rootTransforms">Root transform of object to export</param>
-		public GLTFSceneExporter(Transform[] rootTransforms)
+		public GLTFSceneExporter(Transform[] rootTransforms, string generator = "")
 		{
-			initializeStructures();
+			initializeStructures(generator);
 			_rootTransforms = rootTransforms;
 		}
 
@@ -69,12 +76,20 @@ namespace UnityGLTF
 			_rootTransforms = rootTransforms;
 		}
 
+		public void enableAnimation(bool enable)
+		{
+			_exportAnimation = enable;
+		}
+
 		private void initializeStructures(string generator = "")
 		{
 			_exportedTransforms = new Dictionary<int, int>();
 			_animatedNodes = new List<Transform>();
 			_skinnedNodes = new List<Transform>();
 			_exportedFiles = new Dictionary<string, string>();
+			_textureCache = new GLTFTextureUtilsCache();
+			_bakedMeshes = new Dictionary<SkinnedMeshRenderer, UnityEngine.Mesh>();
+
 			_root = new GLTFRoot
 			{
 				Accessors = new List<Accessor>(),
@@ -82,10 +97,12 @@ namespace UnityGLTF
 				Asset = new Asset
 				{
 					Version = "2.0",
-					Generator = "UnityGLTF (" + Application.unityVersion + ")"
+					Generator = generator.Length > 0 ? generator : "UnityGLTF (" + Application.unityVersion + ")"
 				},
 				Buffers = new List<GLTF.Schema.Buffer>(),
 				BufferViews = new List<BufferView>(),
+				ExtensionsUsed = new List<string>(),
+				ExtensionsRequired = new List<string>(),
 				Images = new List<Image>(),
 				Materials = new List<GLTF.Schema.Material>(),
 				Meshes = new List<GLTF.Schema.Mesh>(),
@@ -139,23 +156,17 @@ namespace UnityGLTF
 			_bufferWriter = new BinaryWriter(binFile);
 
 			_root.Scene = ExportScene(fileName, _rootTransforms);
-
-			// Export animation
-			GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
-			anim.Name = "Take 001";
-			for (int i = 0; i < _animatedNodes.Count; ++i)
+			if (_exportAnimation)
 			{
-				Transform t = _animatedNodes[i];
-				exportAnimationFromNode(ref t, ref anim);
+				exportAnimation();
+				// Export skins
+				for (int i = 0; i < _skinnedNodes.Count; ++i)
+				{
+					Transform t = _skinnedNodes[i];
+					exportSkinFromNode(t);
+				}
 			}
-			_root.Animations.Add(anim);
 
-			// Export skins
-			for (int i = 0; i < _skinnedNodes.Count; ++i)
-			{
-				Transform t = _skinnedNodes[i];
-				exportSkinFromNode(t);
-			}
 
 			_buffer.Uri = fileName + ".bin";
 			_buffer.ByteLength = (int)_bufferWriter.BaseStream.Length;
@@ -178,9 +189,25 @@ namespace UnityGLTF
 			foreach (var image in _images)
 			{
 				//Should filter regarding channel that use it
-				string outputPath = Path.Combine(path, GLTFUtils.buildImageName(image));
-				GLTFTextureUtils.writeTextureOnDisk(GLTFTextureUtils.flipTexture(image), outputPath);
-				_exportedFiles.Add(outputPath, "");
+				string outputPath = Path.Combine(path, GLTFUtils.buildImageName(image)); // Png by default, but will be changed in write function
+				string finalOutputPath = GLTFTextureUtils.writeTextureOnDisk(_textureCache.flipTexture(image), outputPath, true);
+				_exportedFiles.Add(finalOutputPath, "");
+			}
+		}
+
+		private void exportAnimation()
+		{
+			GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
+			anim.Name = "Take 001";
+			for (int i = 0; i < _animatedNodes.Count; ++i)
+			{
+				Transform t = _animatedNodes[i];
+				exportAnimationFromNode(ref t, ref anim);
+			}
+
+			if (anim.Channels.Count > 0 && anim.Samplers.Count > 0)
+			{
+				_root.Animations.Add(anim);
 			}
 		}
 
@@ -191,8 +218,21 @@ namespace UnityGLTF
 				return gameObject.GetComponent<MeshFilter>().sharedMesh;
 			}
 
-			if (gameObject.GetComponent<SkinnedMeshRenderer>())
+			SkinnedMeshRenderer skinMesh = gameObject.GetComponent<SkinnedMeshRenderer>();
+			if (skinMesh)
 			{
+				if(!_exportAnimation && _bakeSkinnedMeshes)
+				{
+					if(!_bakedMeshes.ContainsKey(skinMesh))
+					{
+						UnityEngine.Mesh bakedMesh = new UnityEngine.Mesh();
+						skinMesh.BakeMesh(bakedMesh);
+						_bakedMeshes.Add(skinMesh, bakedMesh);
+					}
+
+					return _bakedMeshes[skinMesh];
+				}
+
 				return gameObject.GetComponent<SkinnedMeshRenderer>().sharedMesh;
 			}
 
@@ -254,6 +294,11 @@ namespace UnityGLTF
 
 		private NodeId ExportNode(Transform nodeTransform)
 		{
+			if (nodeTransform.name == "c")
+			{
+				Debug.Log("FERMEBIENTAGUULE");
+			}
+
 			var node = new Node();
 
 			if (ExportNames)
@@ -276,6 +321,7 @@ namespace UnityGLTF
 				Root = _root
 			};
 
+			// Register nodes for animation parsing (could be disabled is animation is disables)
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
 
 			_root.Nodes.Add(node);
@@ -293,6 +339,8 @@ namespace UnityGLTF
 					_primOwner[new PrimKey { Mesh = getMesh(prim), Material = getMaterial(prim) }] = node.Mesh;
 				}
 			}
+
+
 
 			// children that are not primitives get added as child nodes
 			if (nonPrimitives.Length > 0)
@@ -322,9 +370,6 @@ namespace UnityGLTF
 			for (var i = 0; i < childCount; i++)
 			{
 				var go = transform.GetChild(i).gameObject;
-				if (IsPrimitive(go))
-					prims.Add(go);
-				else
 					nonPrims.Add(go);
 			}
 
@@ -552,19 +597,35 @@ namespace UnityGLTF
 						var occTex = materialObj.GetTexture("_OcclusionMap");
 						if (occTex != null)
 						{
-							var info = new OcclusionTextureInfo();
-							if (materialObj.HasProperty("_OcclusionStrength"))
+							if(material.PbrMetallicRoughness.MetallicRoughnessTexture != null)
 							{
-								info.Strength = materialObj.GetFloat("_OcclusionStrength");
+								var info = new OcclusionTextureInfo();
+								if (materialObj.HasProperty("_OcclusionStrength"))
+								{
+									info.Strength = materialObj.GetFloat("_OcclusionStrength");
+								}
+								info.Index = material.PbrMetallicRoughness.MetallicRoughnessTexture.Index;
+								material.OcclusionTexture = info;
 							}
-							info.Index = material.PbrMetallicRoughness.MetallicRoughnessTexture.Index;
-							material.OcclusionTexture = info;
+							else
+							{
+								material.OcclusionTexture = ExportOcclusionTextureInfo(occTex, materialObj);
+							}
 						}
 					}
 					break;
 				case "Standard (Specular setup)":
 					KHR_materials_pbrSpecularGlossinessExtension pbr = convertSpecular(materialObj);
 					material.Extensions.Add(KHR_materials_pbrSpecularGlossinessExtensionFactory.EXTENSION_NAME, pbr);
+					registerExtension(KHR_materials_pbrSpecularGlossinessExtensionFactory.EXTENSION_NAME);
+					if (materialObj.HasProperty("_OcclusionMap"))
+					{
+						var occTex = materialObj.GetTexture("_OcclusionMap");
+						if (occTex != null)
+						{
+							material.OcclusionTexture = ExportOcclusionTextureInfo(occTex, materialObj);
+						}
+					}
 					break;
 				case "GLTF/GLTFConstant":
 					material.CommonConstant = ExportCommonConstant(materialObj);
@@ -580,6 +641,19 @@ namespace UnityGLTF
 			_root.Materials.Add(material);
 
 			return id;
+		}
+
+		private void registerExtension(string extension, bool isRequired=false)
+		{
+			if(!_root.ExtensionsUsed.Contains(extension))
+			{
+				_root.ExtensionsUsed.Add(extension);
+			}
+
+			if(isRequired && !_root.ExtensionsRequired.Contains(extension))
+			{
+				_root.ExtensionsRequired.Add(extension);
+			}
 		}
 
 		private KHR_materials_pbrSpecularGlossinessExtension convertSpecular(UnityEngine.Material mat)
@@ -612,8 +686,7 @@ namespace UnityGLTF
 		private NormalTextureInfo ExportNormalTextureInfo(UnityEngine.Texture texture, UnityEngine.Material material)
 		{
 			var info = new NormalTextureInfo();
-			info.Index = ExportTexture(GLTFTextureUtils.handleNormalMap((Texture2D)texture));
-
+			info.Index = ExportTexture(_textureCache.handleNormalMap((Texture2D)texture));
 			if (material.HasProperty("_BumpScale"))
 			{
 				info.Scale = material.GetFloat("_BumpScale");
@@ -685,7 +758,7 @@ namespace UnityGLTF
 				if (mgTex != null)
 				{
 					var occTex = (material.HasProperty("_OcclusionMap") ? material.GetTexture("_OcclusionMap") as Texture2D : null);
-					pbr.MetallicRoughnessTexture = ExportTextureInfo(GLTFTextureUtils.packOcclusionMetalRough(mgTex, occTex));
+					pbr.MetallicRoughnessTexture = ExportTextureInfo(_textureCache.packOcclusionMetalRough(mgTex, occTex));
 				}
 			}
 
@@ -788,7 +861,7 @@ namespace UnityGLTF
 
 			_images.Add(texture as Texture2D);
 
-			image.Uri = imagePath; // Uri.EscapeUriString(imagePath);
+			image.Uri = imagePath;
 
 			id = new ImageId {
 				Id = _root.Images.Count,
@@ -919,12 +992,21 @@ namespace UnityGLTF
 			}
 
 			var byteOffset = _bufferWriter.BaseStream.Position;
+			if (_forceIndicesUint)
+			{
+				accessor.ComponentType = GLTFComponentType.UnsignedInt;
+				foreach (var v in arr)
+				{
+					_bufferWriter.Write((uint)v);
 
-			if (max <= byte.MaxValue && min >= byte.MinValue)
+				}
+			}
+			else if (max <= byte.MaxValue && min >= byte.MinValue)
 			{
 				accessor.ComponentType = GLTFComponentType.UnsignedByte;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((byte)v);
 				}
 			}
@@ -932,7 +1014,8 @@ namespace UnityGLTF
 			{
 				accessor.ComponentType = GLTFComponentType.Byte;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((sbyte)v);
 				}
 			}
@@ -940,7 +1023,8 @@ namespace UnityGLTF
 			{
 				accessor.ComponentType = GLTFComponentType.Short;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((short)v);
 				}
 			}
@@ -948,7 +1032,8 @@ namespace UnityGLTF
 			{
 				accessor.ComponentType = GLTFComponentType.UnsignedShort;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((ushort)v);
 				}
 			}
@@ -956,7 +1041,8 @@ namespace UnityGLTF
 			{
 				accessor.ComponentType = GLTFComponentType.UnsignedInt;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((uint)v);
 				}
 			}
@@ -964,7 +1050,8 @@ namespace UnityGLTF
 			{
 				accessor.ComponentType = GLTFComponentType.Float;
 
-				foreach (var v in arr) {
+				foreach (var v in arr)
+				{
 					_bufferWriter.Write((float)v);
 				}
 			}
@@ -1634,7 +1721,6 @@ namespace UnityGLTF
 				{
 					//FIXME It seems not good to generate one animation per animator.
 					convertClipToGLTFAnimation(ref clips[i], ref transform, ref anim);
-					_root.Animations.Add(anim);
 				}
 			}
 
@@ -1646,14 +1732,21 @@ namespace UnityGLTF
 				{
 					//FIXME It seems not good to generate one animation per animator.
 					convertClipToGLTFAnimation(ref clips[i], ref transform, ref anim);
-					_root.Animations.Add(anim);
 				}
 			}
 		}
 
 		private int getTargetIdFromTransform(ref Transform transform)
 		{
-			return _exportedTransforms[transform.GetInstanceID()];
+			if (_exportedTransforms.ContainsKey(transform.GetInstanceID()))
+			{
+				return _exportedTransforms[transform.GetInstanceID()];
+			}
+			else
+			{
+				Debug.Log(transform.name + " " + transform.GetInstanceID());
+				return 0;
+			}
 		}
 
 		private AccessorId ExportAccessor()
