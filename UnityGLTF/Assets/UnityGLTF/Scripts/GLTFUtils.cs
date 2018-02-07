@@ -47,7 +47,23 @@ public class GLTFUtils
 		return Selection.transforms;
 	}
 
-	public static string unifyPathSeparator(string path)
+    public static string UnityToSystemPath(string path)
+    {
+        char unitySeparator = '/';
+        char pathSeparator = Path.DirectorySeparatorChar;
+        path = path.Replace("Assets", Application.dataPath).Replace(unitySeparator, pathSeparator);
+        return path;
+    }
+
+    public static string SystemToUnityPath(string path)
+    {
+        char unitySeparator = '/';
+        char pathSeparator = Path.DirectorySeparatorChar;
+        path = path.Replace(pathSeparator, unitySeparator).Replace(Application.dataPath, "Assets");
+        return path;
+    }
+
+    public static string unifyPathSeparator(string path)
 	{
 		return path.Replace("\\\\", "/").Replace("\\", "/");
 	}
@@ -61,11 +77,16 @@ public class GLTFUtils
 		return unifyPathSeparator(projectPath.Replace("Assets", Application.dataPath));
 	}
 
+    public static bool isFolderInProjectDirectory(string path)
+    {
+        return path.Contains(Application.dataPath);
+    }
+
 	public static Regex rgx = new Regex("[^a-zA-Z0-9 -_.]");
 
 	static public string cleanName(string s)
 	{
-		return rgx.Replace(s, "").Replace("/", " ").Replace("\\", " ");
+		return rgx.Replace(s, "").Replace("/", " ").Replace("\\", " ").Replace(":", "_");
 	}
 
 	static public bool isValidMeshObject(GameObject gameObject)
@@ -86,12 +107,18 @@ public class GLTFUtils
 
 	public static void removeFileList(string[] fileList)
 	{
-		foreach(string file in fileList)
-		{
-			if (File.Exists(file))
-				File.Delete(file);
-		}
-	}
+        foreach (string file in fileList)
+        {
+            if (File.Exists(file))
+                File.Delete(file);
+        }
+
+        foreach (string dir in fileList)
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir);
+        }
+    }
 
 	public static Matrix4x4 convertMatrixLeftToRightHandedness(Matrix4x4 mat)
 	{

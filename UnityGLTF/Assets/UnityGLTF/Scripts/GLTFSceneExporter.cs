@@ -13,7 +13,15 @@ namespace UnityGLTF
 {
 	public class GLTFSceneExporter
 	{
-		public static string EXPORTER_VERSION = "2.2.0";
+        public enum EXPORT_STEP
+        {
+            NODES, 
+            ANIMATIONS, 
+            SKINNING, 
+            IMAGES
+        }
+
+        public static string EXPORTER_VERSION = "2.2.0";
 		private Transform[] _rootTransforms;
 		private GLTFRoot _root;
 		private BufferId _bufferId;
@@ -27,8 +35,13 @@ namespace UnityGLTF
 		private List<Transform> _skinnedNodes;
 		private Dictionary<SkinnedMeshRenderer, UnityEngine.Mesh> _bakedMeshes;
 
-		// Temporary setting to avoid validation issue 'not multiple of 4' in bufferView.offset
-		private bool _forceIndicesUint = true;
+        public delegate void ProgressCallback(EXPORT_STEP step, float current, float total);
+        public delegate void FinishCallback();
+        ProgressCallback _progressCallback;
+        FinishCallback _finishCallback;
+
+        // Temporary setting to avoid validation issue 'not multiple of 4' in bufferView.offset
+        private bool _forceIndicesUint = true;
 
 		private bool _exportAnimation = true;
 		private bool _bakeSkinnedMeshes = false;
@@ -53,6 +66,30 @@ namespace UnityGLTF
 			initializeStructures();
 		}
 
+        public void setProgressCallback(ProgressCallback cb)
+        {
+            _progressCallback = cb;
+        }
+
+        private void updateProgress(EXPORT_STEP step, float current, float total)
+        {
+            if(_progressCallback != null)
+            {
+                _progressCallback(step, current, total);
+            }
+        }
+
+        public void setExportFinishCallback(FinishCallback cb)
+        {
+            _finishCallback = cb;
+        }
+
+        public void triggerFinishCallback()
+        {
+            if (_finishCallback != null)
+                _finishCallback();
+
+        }
 		/// <summary>
 		/// Create a GLTFExporter that exports out a transform
 		/// </summary>
@@ -144,58 +181,64 @@ namespace UnityGLTF
 			initializeStructures();
 		}
 
-		/// <summary>
-		/// Specifies the path and filename for the GLTF Json and binary
-		/// </summary>
-		/// <param name="path">File path for saving the GLTF and binary files</param>
-		/// <param name="fileName">The name of the GLTF file</param>
-		public void SaveGLTFandBin(string path, string fileName)
-		{
-			string binPath = Path.Combine(path, fileName + ".bin");
-			var binFile = File.Create(binPath);
-			_bufferWriter = new BinaryWriter(binFile);
+        /// <summary>
+        /// Specifies the path and filename for the GLTF Json and binary
+        /// </summary>
+        /// <param name="path">File path for saving the GLTF and binary files</param>
+        /// <param name="fileName">The name of the GLTF file</param>
+        public void SaveGLTFandBin(string path, string fileName)
+        {
+            string binPath = Path.Combine(path, fileName + ".bin");
+            var binFile = File.Create(binPath);
+            _bufferWriter = new BinaryWriter(binFile);
 
-			_root.Scene = ExportScene(fileName, _rootTransforms);
-			if (_exportAnimation)
-			{
-				exportAnimation();
-				// Export skins
-				for (int i = 0; i < _skinnedNodes.Count; ++i)
-				{
-					Transform t = _skinnedNodes[i];
-					exportSkinFromNode(t);
-				}
-			}
+            _root.Scene = ExportScene(fileName, _rootTransforms);
+            if (_exportAnimation)
+            {
+                exportAnimation();
+                // Export skins
+                for (int i = 0; i < _skinnedNodes.Count; ++i)
+                {
+                    Transform t = _skinnedNodes[i];
+                    exportSkinFromNode(t);
+
+                    updateProgress(EXPORT_STEP.SKINNING, i,  _skinnedNodes.Count);
+                }
+            }
 
 
-			_buffer.Uri = fileName + ".bin";
-			_buffer.ByteLength = (int)_bufferWriter.BaseStream.Length;
+            _buffer.Uri = fileName + ".bin";
+            _buffer.ByteLength = (int)_bufferWriter.BaseStream.Length;
 
-			_exportedFiles.Add(binPath, "");
+            _exportedFiles.Add(binPath, "");
 
-			string gltfPath = Path.Combine(path, fileName + ".gltf");
-			var gltfFile = File.CreateText(gltfPath);
-			_root.Serialize(gltfFile);
+            string gltfPath = Path.Combine(path, fileName + ".gltf");
+            var gltfFile = File.CreateText(gltfPath);
+            _root.Serialize(gltfFile);
 
 #if WINDOWS_UWP
 			gltfFile.Dispose();
 			binFile.Dispose();
 #else
-			gltfFile.Close();
-			binFile.Close();
+            gltfFile.Close();
+            binFile.Close();
 #endif
-			_exportedFiles.Add(gltfPath, "");
-			GL.sRGBWrite = true;
-			foreach (var image in _images)
-			{
-				//Should filter regarding channel that use it
-				string outputPath = Path.Combine(path, GLTFUtils.buildImageName(image)); // Png by default, but will be changed in write function
-				string finalOutputPath = GLTFTextureUtils.writeTextureOnDisk(_textureCache.flipTexture(image), outputPath, true);
-				_exportedFiles.Add(finalOutputPath, "");
-			}
-		}
+            _exportedFiles.Add(gltfPath, "");
+            GL.sRGBWrite = true;
+            foreach (var image in _images)
+            {
+                //Should filter regarding channel that use it
+                string outputPath = Path.Combine(path, GLTFUtils.buildImageName(image)); // Png by default, but will be changed in write function
+                string finalOutputPath = GLTFTextureUtils.writeTextureOnDisk(_textureCache.flipTexture(image), outputPath, true);
+                _exportedFiles.Add(finalOutputPath, "");
 
-		private void exportAnimation()
+                updateProgress(EXPORT_STEP.IMAGES, _images.IndexOf(image), _images.Count);
+            }
+
+            triggerFinishCallback();
+        }
+
+        private void exportAnimation()
 		{
 			GLTF.Schema.Animation anim = new GLTF.Schema.Animation();
 			anim.Name = "Take 001";
@@ -203,6 +246,8 @@ namespace UnityGLTF
 			{
 				Transform t = _animatedNodes[i];
 				exportAnimationFromNode(ref t, ref anim);
+
+                updateProgress(EXPORT_STEP.ANIMATIONS, i, _animatedNodes.Count);
 			}
 
 			if (anim.Channels.Count > 0 && anim.Samplers.Count > 0)
@@ -211,7 +256,7 @@ namespace UnityGLTF
 			}
 		}
 
-		private UnityEngine.Mesh getMesh(GameObject gameObject)
+        private UnityEngine.Mesh getMesh(GameObject gameObject)
 		{
 			if(gameObject.GetComponent<MeshFilter>())
 			{
@@ -269,7 +314,30 @@ namespace UnityGLTF
 			return null;
 		}
 
-		private SceneId ExportScene(string name, Transform[] rootObjTransforms)
+        private int countNodes(Transform[] trs)
+        {
+            int ct = 0;
+            foreach (Transform tr in trs)
+            {
+                countRecursive(tr, ref ct);
+            }
+
+            return ct;
+        }
+
+        private void countRecursive(Transform tr, ref int count)
+        {
+            count += 1;
+            if (tr.childCount > 0)
+            {
+                for (int i = 0; i < tr.childCount; ++i)
+                {
+                    countRecursive(tr.GetChild(i), ref count);
+                }
+            }
+        }
+
+        private SceneId ExportScene(string name, Transform[] rootObjTransforms)
 		{
 			var scene = new Scene();
 
@@ -277,11 +345,11 @@ namespace UnityGLTF
 			{
 				scene.Name = name;
 			}
-
+            int nodeCount = countNodes(rootObjTransforms);
 			scene.Nodes = new List<NodeId>(rootObjTransforms.Length);
 			foreach (var transform in rootObjTransforms)
 			{
-				scene.Nodes.Add(ExportNode(transform));
+				scene.Nodes.Add(ExportNode(transform, nodeCount));
 			}
 
 			_root.Scenes.Add(scene);
@@ -292,7 +360,7 @@ namespace UnityGLTF
 			};
 		}
 
-		private NodeId ExportNode(Transform nodeTransform)
+        private NodeId ExportNode(Transform nodeTransform, int nodeCount)
 		{
 			var node = new Node();
 
@@ -321,6 +389,8 @@ namespace UnityGLTF
 			_exportedTransforms.Add(nodeTransform.GetInstanceID(), _root.Nodes.Count);
 
 			_root.Nodes.Add(node);
+            // Update progress
+            updateProgress(EXPORT_STEP.NODES, _root.Nodes.Count, nodeCount);
 
 			// children that are primitives get put in a mesh
 			GameObject[] primitives, nonPrimitives;
@@ -342,7 +412,7 @@ namespace UnityGLTF
 				node.Children = new List<NodeId>(nonPrimitives.Length);
 				foreach(var child in nonPrimitives)
 				{
-					node.Children.Add(ExportNode(child.transform));
+					node.Children.Add(ExportNode(child.transform, nodeCount));
 				}
 			}
 

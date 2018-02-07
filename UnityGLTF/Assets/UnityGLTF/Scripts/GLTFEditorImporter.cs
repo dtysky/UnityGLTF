@@ -13,13 +13,26 @@ using UnityEditor;
 
 namespace UnityGLTF
 {
-	/// <summary>
-	/// Editor windows to load a GLTF scene in editor
-	/// </summary>
-	///
+    /// <summary>
+    /// Editor windows to load a GLTF scene in editor
+    /// </summary>
+    ///
 
-	public class GLTFEditorImporter
+    public class GLTFEditorImporter
 	{
+        public enum IMPORT_STEP
+        {
+            READ_FILE,
+            BUFFER,
+            IMAGE,
+            TEXTURE,
+            MATERIAL,
+            MESH,
+            NODE,
+            ANIMATION,
+            SKIN
+        }
+
 		// Public
 		public bool _useGLTFMaterial = false;
 		bool _isDone = false;
@@ -28,6 +41,7 @@ namespace UnityGLTF
 		private string _projectDirectoryPath;
 		private string _gltfDirectoryPath;
 		private string _glTFPath = "";
+        private bool _addToCurrentScene;
 
 		// GLTF data
 		private byte[] _glTFData;
@@ -41,7 +55,6 @@ namespace UnityGLTF
 
 		// Import state
 		List<string> _messages;
-		private string _status = "";
 		private TaskManager _taskManager;
 		private bool _userStopped = false;
 
@@ -52,11 +65,20 @@ namespace UnityGLTF
 		private string _currentSampleName = "";
 		public int MAX_VERTICES = 65535;
 
-		public delegate void RefreshWindow();
-		private RefreshWindow _refreshMethod;
+        public delegate void RefreshWindow();
+        public delegate void ProgressCallback(IMPORT_STEP step, int current, int total);
+
+        private RefreshWindow _finishCallback;
+        private ProgressCallback _progressCallback;
+
 		private List<string> _assetsToRemove;
 		Dictionary<int, GameObject> _importedObjects;
 		Dictionary<int, List<SkinnedMeshRenderer>>_skinIndexToGameObjects;
+
+        // TEST ONLY
+        public string _currentElementType = "";
+        public int currentElement = -1;
+        public int totalElements = -1;
 
 		public enum MaterialType
 		{
@@ -82,9 +104,10 @@ namespace UnityGLTF
 		/// Constructors setting the delegate function to call after each iteration
 		/// </summary>
 		/// <param name="delegateFunction">The function to call after each iteration (usually Repaint())</param>
-		public GLTFEditorImporter(RefreshWindow delegateFunction)
+		public GLTFEditorImporter(ProgressCallback progressCallback, RefreshWindow finish=null)
 		{
-			_refreshMethod = delegateFunction;
+            _progressCallback = progressCallback;
+            _finishCallback = finish;
 			Initialize();
 		}
 
@@ -112,14 +135,15 @@ namespace UnityGLTF
 		/// <param name="gltfPath">Absolute path to the glTF file to import</param>
 		/// <param name="importPath">Path in current project where to import the model</param>
 		/// <param name="modelName">Name of the model prefab to create<param>
-		public void setupForPath(string gltfPath, string importPath, string modelName)
+		public void setupForPath(string gltfPath, string importPath, string modelName, bool addScene=false)
 		{
 			_glTFPath = gltfPath;
 			_gltfDirectoryPath = Path.GetDirectoryName(_glTFPath);
 			_currentSampleName = modelName;
 			_projectDirectoryPath = importPath;
-			_assetManager = new AssetManager(_projectDirectoryPath);
+			_assetManager = new AssetManager(_projectDirectoryPath, _currentSampleName);
 			_importedObjects.Clear();
+            _addToCurrentScene = addScene;
 			_skinIndexToGameObjects.Clear();
 		}
 
@@ -153,7 +177,7 @@ namespace UnityGLTF
 			_messages.Clear();
 
 			if (_assetManager != null)
-				_assetManager.hardClean();
+				_assetManager.softClean();
 
 			for (int i = 0; i < _importedFiles.Count; ++i)
 			{
@@ -172,19 +196,19 @@ namespace UnityGLTF
 				{
 					_userStopped = false;
 					ClearEverything();
-					setStatus("Used interrupted");
 					_isDone = true;
 				}
 				else
 				{
 					if (_taskManager != null && _taskManager.play())
-						_refreshMethod();
+                    {
+                        // Do stuff
+                    }
 					else
 					{
 						_isDone = true;
 						finishImport();
 						_assetManager.softClean();
-						_assetManager.addModelToScene();
 					}
 				}
 			}
@@ -193,32 +217,6 @@ namespace UnityGLTF
 		public void OnDestroy()
 		{
 			ClearEverything();
-		}
-
-		private void setStatus(string status, bool last=false)
-		{
-			if(last)
-			{
-				_messages[_messages.Count - 1] = status;
-			}
-			else
-			{
-				_messages.Add(status);
-			}
-
-			_status = "";
-
-			for (int i = 0; i < _messages.Count; ++i)
-			{
-				_status = _status + "\n" + _messages[i];
-			}
-
-			this._refreshMethod();
-		}
-
-		public string getStatus()
-		{
-			return _status;
 		}
 
 		public void Load(bool useGLTFMaterial=false)
@@ -253,20 +251,10 @@ namespace UnityGLTF
 		private void LoadFile(int sceneIndex = -1)
 		{
 			_glTFData = File.ReadAllBytes(_glTFPath);
-			setStatus("Loaded file: " + _glTFPath);
-			try
-			{
-				GLTFProperty.RegisterExtension(new KHR_materials_pbrSpecularGlossinessExtensionFactory());
-			}
-			catch (Exception)
-			{
-
-			}
-
 			_root = GLTFParser.ParseJson(_glTFData);
 		}
 
-		private void LoadGLTFScene(int sceneIndex = -1)
+        private void LoadGLTFScene(int sceneIndex = -1)
 		{
 			Scene scene;
 			if (sceneIndex >= 0 && sceneIndex < _root.Scenes.Count)
@@ -352,23 +340,23 @@ namespace UnityGLTF
 		{
 			if (_root.Buffers != null)
 			{
-				// todo add fuzzing to verify that buffers are before uri
-				for (int i = 0; i < _root.Buffers.Count; ++i)
+                // todo add fuzzing to verify that buffers are before uri
+                setProgress(IMPORT_STEP.BUFFER, 0, _root.Buffers.Count);
+                for (int i = 0; i < _root.Buffers.Count; ++i)
 				{
 					GLTF.Schema.Buffer buffer = _root.Buffers[i];
 					if (buffer.Uri != null)
 					{
-						LoadBuffer(_gltfDirectoryPath, buffer, i);
-						setStatus("Loaded buffer from file " + buffer.Uri);
+                        LoadBuffer(_gltfDirectoryPath, buffer, i);
 					}
 					else //null buffer uri indicates GLB buffer loading
 					{
 						byte[] glbBuffer;
 						GLTFParser.ExtractBinaryChunk(_glTFData, i, out glbBuffer);
 						_assetCache.BufferCache[i] = glbBuffer;
-						setStatus("Loaded embedded buffer " + i);
-					}
-					yield return null;
+                    }
+                    setProgress(IMPORT_STEP.BUFFER, (i + 1), _root.Buffers.Count);
+                    yield return null;
 				}
 			}
 		}
@@ -397,8 +385,8 @@ namespace UnityGLTF
 			{
 				Image image = _root.Images[i];
 				LoadImage(_gltfDirectoryPath, image, i);
-				setStatus("Loaded Image " + (i + 1) + "/" + _root.Images.Count + (image.Uri != null ? "(" + image.Uri + ")" : " (embedded)"), i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.IMAGE, (i + 1), _root.Images.Count);
+                yield return null;
 			}
 		}
 
@@ -448,8 +436,8 @@ namespace UnityGLTF
 			for(int i = 0; i < _root.Textures.Count; ++i)
 			{
 				SetupTexture(_root.Textures[i], i);
-				setStatus("Loaded texture " + (i + 1) + "/" + _root.Textures.Count, i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.TEXTURE, (i + 1), _root.Textures.Count);
+                yield return null;
 			}
 		}
 
@@ -500,8 +488,8 @@ namespace UnityGLTF
 				else
 					CreateUnityMaterial(_root.Materials[i], i);
 
-				setStatus("Loaded material " + (i + 1) + "/" + _root.Materials.Count, i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.MATERIAL, (i + 1), _root.Materials.Count);
+                yield return null;
 			}
 		}
 
@@ -550,12 +538,12 @@ namespace UnityGLTF
 				material.SetInt("_EmissionUV", def.EmissiveTexture.TexCoord);
 			}
 
-			material.SetColor("_EmissionColor", def.EmissiveFactor.ToUnityColor());
+			material.SetColor("_EmissionColor", def.EmissiveFactor.ToUnityColor().gamma);
 
 			if (specularGlossinessExtension != null)
 			{
 				KHR_materials_pbrSpecularGlossinessExtension pbr = (KHR_materials_pbrSpecularGlossinessExtension)specularGlossinessExtension;
-				material.SetColor("_Color", pbr.DiffuseFactor.ToUnityColor());
+				material.SetColor("_Color", pbr.DiffuseFactor.ToUnityColor().gamma);
 				if (pbr.DiffuseTexture != null)
 				{
 					var texture = pbr.DiffuseTexture.Index.Id;
@@ -589,7 +577,7 @@ namespace UnityGLTF
 			{
 				var pbr = def.PbrMetallicRoughness;
 
-				material.SetColor("_Color", pbr.BaseColorFactor.ToUnityColor());
+				material.SetColor("_Color", pbr.BaseColorFactor.ToUnityColor().gamma);
 				if (pbr.BaseColorTexture != null)
 				{
 					var texture = pbr.BaseColorTexture.Index.Id;
@@ -603,7 +591,7 @@ namespace UnityGLTF
 				{
 					var texture = pbr.MetallicRoughnessTexture.Index.Id;
 					UnityEngine.Texture2D inputTexture = getTexture(texture) as Texture2D;
-					List<Texture2D> splitTextures = splitMetalRoughTexture(inputTexture, def.OcclusionTexture != null);
+					List<Texture2D> splitTextures = splitMetalRoughTexture(inputTexture, def.OcclusionTexture != null, (float)pbr.MetallicFactor, (float)pbr.RoughnessFactor);
 					material.SetTexture("_MetallicGlossMap", splitTextures[0]);
 
 					if (def.OcclusionTexture != null)
@@ -621,7 +609,7 @@ namespace UnityGLTF
 			material.hideFlags = HideFlags.None;
 		}
 
-		public List<UnityEngine.Texture2D> splitMetalRoughTexture(Texture2D inputTexture, bool hasOcclusion)
+		public List<UnityEngine.Texture2D> splitMetalRoughTexture(Texture2D inputTexture, bool hasOcclusion, float metallicFactor, float roughnessFactor)
 		{
 			string inputTexturePath = AssetDatabase.GetAssetPath(inputTexture);
 			if (!_assetsToRemove.Contains(inputTexturePath))
@@ -649,7 +637,7 @@ namespace UnityGLTF
 					float met = textureColors[i * width + j].b;
 
 					occlusion[i * width + j] = new Color(occ, occ, occ, 1.0f);
-					metalRough[i * width + j] = new Color(met, met, met, 1.0f - rough);
+					metalRough[i * width + j] = new Color(met * metallicFactor, met * metallicFactor, met * metallicFactor, (1.0f - rough) * roughnessFactor);
 				}
 			}
 
@@ -852,8 +840,8 @@ namespace UnityGLTF
 			for(int i = 0; i < _root.Meshes.Count; ++i)
 			{
 				CreateMeshObject(_root.Meshes[i], i);
-				setStatus("Loaded mesh " + (i + 1) + "/" + _root.Meshes.Count, i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.MESH, (i + 1), _root.Meshes.Count);
+                yield return null;
 			}
 		}
 
@@ -1049,15 +1037,14 @@ namespace UnityGLTF
 
 		private IEnumerator LoadAnimations()
 		{
-			setStatus("Loading animations ...");
 			AnimationClip clip = new AnimationClip();
 			clip.wrapMode = UnityEngine.WrapMode.Loop;
 			for (int i = 0; i < _root.Animations.Count; ++i)
 			{
 				// TMEPORARY to support samples
 				LoadAnimation(_root.Animations[i], i, clip);
-				setStatus("Loaded animation " + (i + 1) + "/" + _root.Animations.Count, i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.ANIMATION, (i + 1), _root.Animations.Count);
+                yield return null;
 			}
 
 			_assetManager.saveAnimationClip(clip);
@@ -1136,14 +1123,20 @@ namespace UnityGLTF
 			}
 		}
 
+        private void setProgress(IMPORT_STEP step, int current, int total)
+        {
+            if (_progressCallback != null)
+                _progressCallback(step, current, total);
+        }
+
 		private IEnumerator LoadSkins()
 		{
-			setStatus("Loading skins...");
-			for (int i = 0; i < _root.Skins.Count; ++i)
+            setProgress(IMPORT_STEP.SKIN, 0, _root.Skins.Count);
+            for (int i = 0; i < _root.Skins.Count; ++i)
 			{
 				LoadSkin(_root.Skins[i], i);
-				setStatus("Loaded skin " + (i + 1) + "/" + _root.Skins.Count, i != 0);
-				yield return null;
+                setProgress(IMPORT_STEP.SKIN, (i + 1), _root.Skins.Count);
+                yield return null;
 			}
 		}
 
@@ -1232,30 +1225,47 @@ namespace UnityGLTF
 			}
 		}
 
+        private void cleanObjects()
+        {
+            foreach (GameObject ob in _importedObjects.Values)
+            {
+                GameObject.DestroyImmediate(ob);
+            }
+            GameObject.DestroyImmediate(_sceneObject);
+            _sceneObject = null;
+            _assetManager.softClean();
+        }
+
 		private void finishImport()
 		{
-			//_assetManager.createAnimatorAsset(_sceneObject.AddComponent<Animator>());
-			_assetManager.savePrefab(_sceneObject, _projectDirectoryPath);
+			GameObject prefab = _assetManager.savePrefab(_sceneObject, _projectDirectoryPath, _addToCurrentScene);
+            if(_root.Animations != null && _root.Animations.Count > 0)
+            cleanObjects();
+            _messages.Clear();
+            _currentElementType = "";
+            if (_finishCallback != null)
+                _finishCallback();
 
-			// Select and focus imported object
-			GameObject[] obj = new GameObject[1];
-			obj[0] = _sceneObject;
-			Selection.objects = obj;
-			EditorApplication.ExecuteMenuItem("Edit/Frame Selected");
-			_messages.Clear();
+            ClearEverything();
 
-			setStatus("Successfully imported " + _glTFPath);
+            if (_addToCurrentScene == true)
+            {
+                // Select and focus imported object
+                _sceneObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+                GameObject[] obj = new GameObject[1];
+                obj[0] = _sceneObject;
+                Selection.objects = obj;
+                EditorApplication.ExecuteMenuItem("Edit/Frame Selected");
+            }
 		}
 
 		protected virtual GameObject CreateNode(Node node, int index)
 		{
 			var nodeObj = createGameObject(node.Name != null && node.Name.Length > 0 ? node.Name : "GLTFNode_" + index);
-			//nodeObj.hideFlags = HideFlags.HideInHierarchy;
 
 			_nbParsedNodes++;
-			setStatus("Parsing node " +  _nbParsedNodes  + " / " +  _root.Nodes.Count, _nbParsedNodes != 1);
-
-			Vector3 position;
+            setProgress(IMPORT_STEP.NODE, _nbParsedNodes, _root.Nodes.Count);
+            Vector3 position;
 			Quaternion rotation;
 			Vector3 scale;
 			node.GetUnityTRSProperties(out position, out rotation, out scale);
@@ -1318,20 +1328,14 @@ namespace UnityGLTF
 				}
 			}
 
-			/* TODO: implement camera (probably a flag to disable for VR as well)
-			if (camera != null)
-			{
-				GameObject cameraObj = camera.Value.Create();
-				cameraObj.transform.parent = nodeObj.transform;
-			}
-			*/
-
 			if (node.Children != null)
 			{
 				foreach (var child in node.Children)
 				{
-					var childObj = CreateNode(child.Value, child.Id);
-					childObj.transform.SetParent(nodeObj.transform, false);
+                    var childObj = CreateNode(child.Value, child.Id);
+                    Vector3 lp = childObj.transform.localPosition;
+                    childObj.transform.SetParent(nodeObj.transform, false);
+                    childObj.transform.localPosition = lp;
 				}
 			}
 

@@ -327,7 +327,6 @@ namespace UnityGLTF
 			var primitiveObj = new GameObject("Primitive");
 
 			var meshFilter = primitiveObj.AddComponent<MeshFilter>();
-			
 			if (_assetCache.MeshCache[meshID][primitiveIndex] == null)
 			{
 				_assetCache.MeshCache[meshID][primitiveIndex] = new MeshCacheData();
@@ -502,11 +501,11 @@ namespace UnityGLTF
 
 					material.SetFloat("_Roughness", (float) pbr.RoughnessFactor);
 				}
-				
+
 				if (def.Extensions != null && def.Extensions.ContainsKey(KHR_materials_pbrSpecularGlossinessExtensionFactory.EXTENSION_NAME))
 				{
 					KHR_materials_pbrSpecularGlossinessExtension specGloss = def.Extensions[KHR_materials_pbrSpecularGlossinessExtensionFactory.EXTENSION_NAME] as KHR_materials_pbrSpecularGlossinessExtension;
-					
+
 					if (specGloss.DiffuseTexture != null)
 					{
 						var texture = specGloss.DiffuseTexture.Index.Value;
