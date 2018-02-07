@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEditor;
 using System.IO;
 using UnityGLTF.Cache;
+using UnityEditor.Animations;
 
 public class AssetManager
 {
@@ -22,9 +23,10 @@ public class AssetManager
 	public List<Texture2D> _parsedImages;
 	public List<Texture2D> _parsedTextures;
 	public List<int> _usedSources;
-	private Object _prefab;
+    public Animator _animator;
+    private string _prefabName;
 
-	public AssetManager(string projectDirectoryPath)
+	public AssetManager(string projectDirectoryPath, string modelName="Imported")
 	{
 		// Prepare hierarchy un project
 		_importDirectory = projectDirectoryPath;
@@ -39,8 +41,6 @@ public class AssetManager
 		_importMaterialsDirectory = Path.Combine(_importDirectory, "materials");
 		Directory.CreateDirectory(_importMaterialsDirectory);
 
-
-
 		_createdGameObjects = new List<GameObject>();
 		_parsedMeshData = new List<List<KeyValuePair<Mesh, Material>>>();
 		_parsedMaterials = new List<Material>();
@@ -48,6 +48,8 @@ public class AssetManager
 		_parsedTextures = new List<Texture2D>();
 		_usedSources = new List<int>();
 		_generatedFiles = new List<string>();
+
+        _prefabName = modelName;
 	}
 
 	private void createAnimationDirectory()
@@ -70,11 +72,6 @@ public class AssetManager
 		}
 		_createdGameObjects.Clear();
 		AssetDatabase.Refresh(); // also triggers Resources.UnloadUnusedAssets()
-	}
-
-	public void addModelToScene()
-	{
-		PrefabUtility.InstantiatePrefab(_prefab);
 	}
 
 	public void hardClean()
@@ -186,7 +183,7 @@ public class AssetManager
 
 	public string generateName(string name, int index)
 	{
-		return GLTFUtils.cleanName(name + "_" + index);
+		return GLTFUtils.cleanName(name + "_" + index).Replace(":", "_");
 	}
 
 	public void registerImageFromData(byte[] imageData, int imageID, string imageName="")
@@ -215,12 +212,13 @@ public class AssetManager
 		string fullPath = Path.Combine(_importMeshesDirectory, baseName);
 		string meshProjectPath = GLTFUtils.getPathProjectFromAbsolute(fullPath);
 
-		if (!File.Exists(fullPath))
-		{
-			AssetDatabase.CreateAsset(mesh, meshProjectPath);
-			_generatedFiles.Add(fullPath);
-			AssetDatabase.Refresh();
-		}
+        serializeAsset(mesh,meshProjectPath, fullPath, true);
+		//if (!File.Exists(fullPath))
+		//{
+		//	AssetDatabase.CreateAsset(mesh, meshProjectPath);
+		//	_generatedFiles.Add(fullPath);
+		//	AssetDatabase.Refresh();
+		//}
 
 		return AssetDatabase.LoadAssetAtPath(meshProjectPath, typeof(Mesh)) as Mesh;
 	}
@@ -240,19 +238,27 @@ public class AssetManager
 		return tex;
 	}
 
+    public void serializeAsset(Object asset, string projectPath, string fullPath, bool overrideFile=true)
+    {
+        if(overrideFile == true && File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+            File.Delete(fullPath+".meta");
+            AssetDatabase.Refresh();
+        }
+
+        AssetDatabase.CreateAsset(asset, projectPath);
+        _generatedFiles.Add(fullPath);
+        AssetDatabase.Refresh();
+    }
+
 	public Material saveMaterial(Material material, int index)
 	{
 		string baseName = generateName(material.name.Length > 0 ? material.name.Trim() : "material", index) + ".mat";
 		string materialAssetPath = Path.Combine(_importMaterialsDirectory, baseName);
 		string materialProjectPath = GLTFUtils.getPathProjectFromAbsolute(materialAssetPath);
 
-		// Write material asset
-		if (!File.Exists(materialAssetPath))
-		{
-			AssetDatabase.CreateAsset(material, materialProjectPath);
-			_generatedFiles.Add(materialAssetPath);
-			AssetDatabase.Refresh();
-		}
+        serializeAsset(material, materialProjectPath, materialAssetPath, true);
 
 		// Reload as asset
 		return (Material)AssetDatabase.LoadAssetAtPath(materialProjectPath, typeof(Material));
@@ -265,23 +271,48 @@ public class AssetManager
 			createAnimationDirectory();
 		}
 
-		string path = GLTFUtils.getPathProjectFromAbsolute(_importAnimationDirectory);
-		AssetDatabase.CreateAsset(clip, path + "/" + clip.name + ".anim");
-		//AssetDatabase.SaveAssets();
-	}
+		string directory = GLTFUtils.getPathProjectFromAbsolute(_importAnimationDirectory);
+        string path = directory + "/" + clip.name + ".anim";
+        AssetDatabase.CreateAsset(clip, path);
+        AssetDatabase.Refresh();
 
-	public void savePrefab(GameObject sceneObject, string _importDirectory)
+        // Add animation to animator
+        AnimationClip loadedClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
+        loadedClip.wrapMode = WrapMode.Loop;
+        createAnimatorAsset(loadedClip);
+    }
+
+    // https://docs.unity3d.com/ScriptReference/Animations.AnimatorController.html
+    private void createAnimatorAsset(AnimationClip clip)
+    {
+        string animatorname = getPrefabName(_prefabName);
+        string animatorPath = GLTFUtils.getPathProjectFromAbsolute(_importAnimationDirectory + "/" + animatorname + ".controller");
+        AnimatorController.CreateAnimatorControllerAtPathWithClip(animatorPath, clip);
+        if (_animator == null)
+            _animator = AssetDatabase.LoadAssetAtPath<Animator>(animatorPath);
+    }
+
+    public string getPrefabName(string sceneObjectName)
+    {
+        return GLTFUtils.cleanName(sceneObjectName.Length > 0 ? sceneObjectName : "GlTF");
+    }
+
+    public GameObject savePrefab(GameObject sceneObject, string _importDirectory, bool instanciateInScene=false)
 	{
-		string baseName = GLTFUtils.cleanName(sceneObject.name.Length > 0 ? sceneObject.name : "GlTF") + ".prefab";
+		string baseName = getPrefabName(sceneObject.name) + ".prefab";
 		string fullPath = Path.Combine(_importDirectory, baseName);
 		string prefabPathInProject = GLTFUtils.getPathProjectFromAbsolute(fullPath);
-		if (!File.Exists(fullPath))
-		{
-			Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject);
-			_generatedFiles.Add(fullPath);
-			PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.ConnectToPrefab);
-			_prefab = prefab;
-		}
+        if(File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+            File.Delete(fullPath + ".meta");
+            AssetDatabase.Refresh();
+        }
+
+		//Object prefab = PrefabUtility.CreateEmptyPrefab(prefabPathInProject);
+		//PrefabUtility.ReplacePrefab(sceneObject, prefab, ReplacePrefabOptions.Default);
+        _generatedFiles.Add(fullPath);
+        return PrefabUtility.CreatePrefab(prefabPathInProject, sceneObject);
 	}
 }
 
