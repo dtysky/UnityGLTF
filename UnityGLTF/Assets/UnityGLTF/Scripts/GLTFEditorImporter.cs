@@ -1037,17 +1037,15 @@ namespace UnityGLTF
 
 		private IEnumerator LoadAnimations()
 		{
-			AnimationClip clip = new AnimationClip();
-			clip.wrapMode = UnityEngine.WrapMode.Loop;
 			for (int i = 0; i < _root.Animations.Count; ++i)
 			{
-				// TMEPORARY to support samples
+				AnimationClip clip = new AnimationClip();
+				clip.wrapMode = UnityEngine.WrapMode.Loop;
 				LoadAnimation(_root.Animations[i], i, clip);
                 setProgress(IMPORT_STEP.ANIMATION, (i + 1), _root.Animations.Count);
-                yield return null;
+				_assetManager.saveAnimationClip(clip);
+				yield return null;
 			}
-
-			_assetManager.saveAnimationClip(clip);
 		}
 
 		private void LoadAnimation(GLTF.Schema.Animation gltfAnimation, int index, AnimationClip clip)
