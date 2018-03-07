@@ -254,7 +254,7 @@ public class AssetManager
 
 	public Material saveMaterial(Material material, int index)
 	{
-		string baseName = generateName(material.name.Length > 0 ? material.name : "material", index) + ".mat";
+		string baseName = generateName(material.name.Length > 0 ? material.name.Trim() : "material", index) + ".mat";
 		string materialAssetPath = Path.Combine(_importMaterialsDirectory, baseName);
 		string materialProjectPath = GLTFUtils.getPathProjectFromAbsolute(materialAssetPath);
 
