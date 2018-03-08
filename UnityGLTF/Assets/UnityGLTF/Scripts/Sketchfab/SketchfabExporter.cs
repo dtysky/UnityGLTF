@@ -129,6 +129,12 @@ namespace Sketchfab
         {
             status = "";
 
+			if(!_logger.isUserLogged())
+			{
+				status = "You need to be logged to upload";
+				return false;
+			}
+
             if (param_name.Length > SketchfabPlugin.NAME_LIMIT)
             {
                 status = "Model name is too long";
@@ -209,9 +215,8 @@ namespace Sketchfab
 
             GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 
-            
             showModelProperties();
-            
+
             GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
             showOptions();
 
@@ -221,26 +226,26 @@ namespace Sketchfab
             else
                 GUI.color = Color.white;
 
+            GUI.enabled = enable;
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button(status, GUILayout.Width(250), GUILayout.Height(40)))
             {
-                GUI.enabled = enable;
-                GUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-
-                if (GUILayout.Button(status, GUILayout.Width(250), GUILayout.Height(40)))
+                if (!enable)
                 {
-                    if (!enable)
-                    {
-                        EditorUtility.DisplayDialog("Error", status, "Ok");
-                    }
-                    else
-                    {
-                        proceedToExportAndUpload();
-                    }
+                    EditorUtility.DisplayDialog("Error", status, "Ok");
                 }
-
-                GUILayout.FlexibleSpace();
-                GUILayout.EndHorizontal();
+                else
+                {
+                    proceedToExportAndUpload();
+                }
             }
+
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+			GUI.color = Color.white;
 
             SketchfabPlugin.displayFooter();
         }
@@ -255,7 +260,7 @@ namespace Sketchfab
             GUILayout.Label("Name");
             param_name = EditorGUILayout.TextField(param_name);
             GUILayout.Label("(" + param_name.Length + "/" + SketchfabPlugin.NAME_LIMIT + ")", EditorStyles.centeredGreyMiniLabel);
-            
+
             EditorStyles.textField.wordWrap = true;
             GUILayout.Space(SketchfabPlugin.SPACE_SIZE);
 
@@ -266,43 +271,8 @@ namespace Sketchfab
             GUILayout.Label("Tags (separated by spaces)");
             param_tags = EditorGUILayout.TextField(param_tags);
             GUILayout.Label("'unity' and 'unity3D' added automatically (" + param_tags.Length + "/50)", EditorStyles.centeredGreyMiniLabel);
-            GUILayout.Label("Set the model to Private", EditorStyles.centeredGreyMiniLabel);
-            if (_logger.canPrivate())
-            {
-                EditorGUILayout.BeginVertical("Box");
-                GUILayout.BeginHorizontal();
-                param_private = EditorGUILayout.Toggle("Private model", param_private);
 
-                if (GUILayout.Button("( " + SketchfabUI.ClickableTextColor("more info") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
-                {
-                    Application.OpenURL(SketchfabPlugin.Urls.privateInfo);
-                }
-
-                GUILayout.FlexibleSpace();
-                GUILayout.EndHorizontal();
-                GUI.enabled = param_private;
-                GUILayout.Label("Password");
-                param_password = EditorGUILayout.TextField(param_password);
-                EditorGUILayout.EndVertical();
-                GUI.enabled = true;
-            }
-            else
-            {
-                if (_logger.isUserBasic())
-                {
-                    if (GUILayout.Button("(" + SketchfabUI.ClickableTextColor("Upgrade to a paid account to set your model to private") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
-                    {
-                        Application.OpenURL(SketchfabPlugin.Urls.plans);
-                    }
-                }
-                else
-                {
-                    if (GUILayout.Button("(" + SketchfabUI.ClickableTextColor("You cannot set any other model to private (limit reached)") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
-                    {
-                        Application.OpenURL(SketchfabPlugin.Urls.plans);
-                    }
-                }
-            }
+			showPrivate();
 
             GUILayout.EndScrollView();
         }
@@ -328,6 +298,50 @@ namespace Sketchfab
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
         }
+
+		private void showPrivate()
+		{
+			if (!_logger.canPrivate())
+			{
+				if (_logger.isUserBasic())
+				{
+					if (GUILayout.Button("(" + SketchfabUI.ClickableTextColor("Upgrade to a paid account to set your model to private") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
+					{
+						Application.OpenURL(SketchfabPlugin.Urls.plans);
+					}
+				}
+				else
+				{
+					if (GUILayout.Button("(" + SketchfabUI.ClickableTextColor("You cannot set any other model to private (limit reached)") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
+					{
+						Application.OpenURL(SketchfabPlugin.Urls.plans);
+					}
+				}
+			}
+			else
+			{
+				GUILayout.Label("Set the model to Private", EditorStyles.centeredGreyMiniLabel);
+			}
+
+			GUI.enabled = _logger.canPrivate();
+			EditorGUILayout.BeginVertical("Box");
+			GUILayout.BeginHorizontal();
+			param_private = EditorGUILayout.Toggle("Private model", param_private);
+
+			if (GUILayout.Button("( " + SketchfabUI.ClickableTextColor("more info") + ")", _ui.SkfbClickableLabel, GUILayout.Height(20)))
+			{
+				Application.OpenURL(SketchfabPlugin.Urls.privateInfo);
+			}
+
+			GUILayout.FlexibleSpace();
+			GUILayout.EndHorizontal();
+			GUI.enabled = param_private;
+			GUILayout.Label("Password");
+			param_password = EditorGUILayout.TextField(param_password);
+			EditorGUILayout.EndVertical();
+
+			GUI.enabled = true;
+		}
 
         private void OnExportProgress(UnityGLTF.GLTFSceneExporter.EXPORT_STEP step, float current, float total)
         {
@@ -389,7 +403,7 @@ namespace Sketchfab
         }
 
         private void handleUploadCallback(float current)
-        { 
+        {
             if (EditorUtility.DisplayCancelableProgressBar("Uploading", "Uploading model to Sketchfab", current))
             {
                 if (_uploadRequest != null)
