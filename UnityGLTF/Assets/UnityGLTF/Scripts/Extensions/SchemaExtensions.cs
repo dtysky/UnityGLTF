@@ -236,7 +236,12 @@ textureObj.wrapMode == TextureWrapMode.Clamp && root.Samplers[i].WrapS == GLTFSe
 
 		public static Matrix4x4 ToUnityMatrix(this GLTF.Math.Matrix4x4 matrix)
 		{
-			return new Matrix4x4(matrix.GetColumn(0), matrix.GetColumn(1), matrix.GetColumn(2), matrix.GetColumn(3));
+			Matrix4x4 mat = new Matrix4x4();
+			mat.SetColumn(0, matrix.GetColumn(0));
+			mat.SetColumn(1, matrix.GetColumn(1));
+			mat.SetColumn(2, matrix.GetColumn(2));
+			mat.SetColumn(3, matrix.GetColumn(3));
+			return mat;
 		}
 
 		public static GLTF.Math.Matrix4x4 ToGLTFMAtrix(this Matrix4x4 matrix)

@@ -1253,8 +1253,10 @@ namespace UnityGLTF
                 GameObject[] obj = new GameObject[1];
                 obj[0] = _sceneObject;
                 Selection.objects = obj;
-                EditorApplication.ExecuteMenuItem("Edit/Frame Selected");
-            }
+#if UNITY_2017
+				EditorApplication.ExecuteMenuItem("Edit/Frame Selected");
+#endif
+			}
 		}
 
 		protected virtual GameObject CreateNode(Node node, int index)
