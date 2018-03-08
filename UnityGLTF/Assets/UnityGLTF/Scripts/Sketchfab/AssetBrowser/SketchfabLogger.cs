@@ -15,7 +15,7 @@ namespace Sketchfab
         public Texture2D avatar = SketchfabPlugin.DEFAULT_AVATAR;
         public bool hasAvatar = false;
         public string avatarUrl;
-        int _canPrivate = -1; // Can protect model = 1  // Cannot = 2
+        public int _userCanPrivate = -1; // Can protect model = 1  // Cannot = 0
 
         public SketchfabProfile(string usr, string planLb)
         {
@@ -138,6 +138,8 @@ namespace Sketchfab
                 GUILayout.Label(_current.avatar);
 
                 GUILayout.EndHorizontal();
+				if (_current._userCanPrivate == -1)
+					requestCanPrivate();
             }
             GUILayout.EndVertical();
         }
@@ -161,6 +163,13 @@ namespace Sketchfab
 			tokenRequest.setFailedCallback(logout);
             SketchfabPlugin.getAPI().registerRequest(tokenRequest);
         }
+
+		public void requestCanPrivate()
+		{
+			SketchfabRequest canPrivateRequest = new SketchfabRequest(SketchfabPlugin.Urls.userAccount, getHeader());
+			canPrivateRequest.setCallback(onCanPrivate);
+			SketchfabPlugin.getAPI().registerRequest(canPrivateRequest);
+		}
 
         private void handleGetToken(string response)
         {
@@ -302,7 +311,7 @@ namespace Sketchfab
 
         public bool canPrivate()
         {
-            return true;
+            return _current != null && _current._userCanPrivate == 1;
         }
 
         public bool checkUserPlanFileSizeLimit(long size)
@@ -325,8 +334,8 @@ namespace Sketchfab
 
         private void onCanPrivate(string response)
         {
-            //JSONNode versionResponse = Utils.JSONParse(response);
-            //_userCanPrivate = jsonResponse["canProtectModels"].AsBool;
+            JSONNode planResponse = Utils.JSONParse(response);
+            _current._userCanPrivate = planResponse["canProtectModels"].AsBool ? 1 : 0;
         }
     }
 }
