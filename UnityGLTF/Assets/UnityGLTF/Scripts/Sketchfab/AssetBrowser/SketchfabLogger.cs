@@ -1,4 +1,4 @@
-﻿using System.Collections;
+﻿#if UNITY_EDITOR
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -339,3 +339,4 @@ namespace Sketchfab
         }
     }
 }
+#endif
